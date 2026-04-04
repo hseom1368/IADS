@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>PAT Battery Alpha — 방공망 시뮬레이터 v3</title>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body,#cesiumContainer{width:100%;height:100%;overflow:hidden;}
+  .cesium-viewer-bottom{display:none!important;}
+
+  #hud{position:absolute;top:12px;left:12px;width:230px;font-family:'Share Tech Mono',monospace;z-index:100;}
+  .hbox{background:rgba(0,4,2,0.91);border:1px solid rgba(0,255,136,0.28);padding:10px 13px;margin-bottom:5px;}
+  .hbox h3{font-family:'Orbitron',sans-serif;font-size:7px;letter-spacing:3px;color:#00ff88;
+    margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid rgba(0,255,136,0.15);}
+  .row{display:flex;justify-content:space-between;font-size:9px;margin-bottom:4px;}
+  .lbl{color:rgba(0,255,136,0.5);}
+  .gn{color:#00ff88;font-weight:bold;} .rd{color:#ff4444;font-weight:bold;}
+  .yl{color:#ffcc00;font-weight:bold;} .bl{color:#44aaff;font-weight:bold;}
+  .or{color:#ff8800;font-weight:bold;} .pu{color:#cc44ff;font-weight:bold;}
+
+  .lrow{display:flex;align-items:center;gap:5px;font-size:9px;margin-bottom:5px;}
+  .lnm{color:rgba(0,255,136,0.55);width:52px;}
+  .pips{display:flex;gap:2px;}
+  .pip{width:8px;height:8px;border-radius:1px;background:#00ff88;border:1px solid rgba(0,255,136,0.35);}
+  .pip.e{background:rgba(0,255,136,0.07);border-color:rgba(0,255,136,0.12);}
+  .pip.r{background:#ffcc00;}
+  .lst{font-size:7px;margin-left:auto;}
+
+  #log{font-size:8px;color:rgba(0,255,136,0.45);max-height:85px;overflow-y:auto;line-height:1.55;}
+  #log::-webkit-scrollbar{width:2px;}
+  #log::-webkit-scrollbar-thumb{background:rgba(0,255,136,0.25);}
+
+  /* 우측 패널 */
+  #rightPanel{position:absolute;top:12px;right:12px;width:175px;font-family:'Share Tech Mono',monospace;z-index:100;}
+  .rbox{background:rgba(0,4,2,0.91);border:1px solid rgba(0,255,136,0.28);padding:10px 13px;margin-bottom:5px;}
+  .rbox h3{font-family:'Orbitron',sans-serif;font-size:7px;letter-spacing:2px;color:#00ff88;
+    margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid rgba(0,255,136,0.15);}
+  .cr{margin-bottom:7px;}
+  .cl{font-size:8px;color:rgba(0,255,136,0.55);display:flex;justify-content:space-between;margin-bottom:3px;}
+  input[type=range]{width:100%;accent-color:#00ff88;height:3px;}
+
+  /* 카메라 버튼 */
+  .cam-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:5px;}
+  .cbtn{background:rgba(0,15,8,0.9);border:1px solid rgba(0,255,136,0.25);color:#00ff88;
+    font-family:'Share Tech Mono',monospace;font-size:8px;padding:5px 3px;
+    cursor:pointer;text-align:center;transition:all 0.15s;}
+  .cbtn:hover{background:rgba(0,255,136,0.12);}
+  .cbtn.w{grid-column:1/-1;}
+
+  /* 하단 버튼 */
+  #controls{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);display:flex;gap:6px;z-index:100;}
+  .btn{background:rgba(0,4,2,0.93);border:1px solid rgba(0,255,136,0.38);color:#00ff88;
+    font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;
+    padding:7px 11px;cursor:pointer;transition:all 0.18s;}
+  .btn:hover{background:rgba(0,255,136,0.1);box-shadow:0 0 8px rgba(0,255,136,0.2);}
+  .btn.r{border-color:rgba(255,68,68,0.38);color:#ff4444;}
+  .btn.r:hover{background:rgba(255,68,68,0.08);}
+  .btn.o{border-color:rgba(255,136,0,0.38);color:#ff8800;}
+  .btn.o:hover{background:rgba(255,136,0,0.08);}
+  .btn.p{border-color:rgba(180,0,255,0.38);color:#cc44ff;}
+  .btn.p:hover{background:rgba(180,0,255,0.08);}
+
+  /* 알림 */
+  #alert{position:absolute;top:12px;left:50%;transform:translateX(-50%);
+    background:rgba(255,0,0,0.1);border:1px solid #ff4444;color:#ff4444;
+    font-family:'Orbitron',sans-serif;font-size:9px;letter-spacing:2px;
+    padding:5px 18px;display:none;z-index:200;pointer-events:none;
+    animation:ap 0.5s infinite;white-space:nowrap;}
+  #failBanner{position:absolute;top:44px;left:50%;transform:translateX(-50%);
+    background:rgba(255,0,0,0.18);border:2px solid #ff0000;color:#ff0000;
+    font-family:'Orbitron',sans-serif;font-size:11px;letter-spacing:3px;
+    padding:7px 22px;display:none;z-index:200;pointer-events:none;
+    animation:ap 0.35s infinite;}
+  @keyframes ap{0%,100%{opacity:1}50%{opacity:0.18}}
+
+  #flash{position:absolute;inset:0;pointer-events:none;background:rgba(255,200,0,0);transition:background 0.08s;}
+  #flash.on{background:rgba(255,200,0,0.06);}
+  #flashR{position:absolute;inset:0;pointer-events:none;background:rgba(255,0,0,0);transition:background 0.08s;}
+  #flashR.on{background:rgba(255,0,0,0.1);}
+
+  #guide{position:absolute;bottom:62px;right:12px;
+    background:rgba(0,4,2,0.8);border:1px solid rgba(255,255,255,0.12);
+    color:rgba(255,255,255,0.38);font-family:'Share Tech Mono',monospace;
+    font-size:8px;padding:7px 10px;z-index:100;pointer-events:none;line-height:1.9;}
+</style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+<div id="flash"></div><div id="flashR"></div>
+<div id="alert">⚠ THREAT DETECTED</div>
+<div id="failBanner">💥 INTERCEPT FAILED — IMPACT!</div>
+
+<!-- 좌측 HUD -->
+<div id="hud">
+  <div class="hbox">
+    <h3>▸ PAT BATTERY ALPHA</h3>
+    <div class="row"><span class="lbl">레이더</span><span class="gn">ACTIVE</span></div>
+    <div class="row"><span class="lbl">교전통제소</span><span class="gn">ONLINE</span></div>
+    <div class="row"><span class="lbl">레이더방향</span><span class="yl" id="rAzTxt">000°(북)</span></div>
+    <div class="row"><span class="lbl">탐지거리</span><span class="bl">100 km</span></div>
+    <div class="row"><span class="lbl">요격거리</span><span class="gn">40 km</span></div>
+  </div>
+  <div class="hbox">
+    <h3>▸ 발사대 현황</h3>
+    <div id="lHUD"></div>
+    <div class="row" style="margin-top:5px;padding-top:5px;border-top:1px solid rgba(0,255,136,0.12)">
+      <span class="lbl">총 가용미사일</span><span class="gn" id="totalM">16발</span>
+    </div>
+    <div class="row">
+      <span class="lbl">요격 성공/실패</span>
+      <span><span class="gn" id="killC">0</span><span style="color:rgba(255,255,255,0.25)"> / </span><span class="rd" id="failC">0</span></span>
+    </div>
+  </div>
+  <div class="hbox">
+    <h3>▸ 교전 로그</h3>
+    <div id="log">시스템 초기화 완료</div>
+  </div>
+</div>
+
+<!-- 우측 패널 -->
+<div id="rightPanel">
+  <div class="rbox">
+    <h3>▸ 레이더 제어</h3>
+    <div class="cr">
+      <div class="cl"><span>방위각</span><span class="yl" id="azLbl">000°</span></div>
+      <input type="range" id="azSlider" min="0" max="360" value="0" oninput="updateRadar()">
+    </div>
+    <div class="cr">
+      <div class="cl"><span>방위각(반각)</span><span class="yl" id="fovAzLbl">±60°</span></div>
+      <input type="range" id="fovAzSlider" min="20" max="120" value="60" oninput="updateRadar()">
+    </div>
+    <div class="cr">
+      <div class="cl"><span>고각 최대</span><span class="yl" id="fovElLbl">90°</span></div>
+      <input type="range" id="fovElSlider" min="30" max="90" value="90" oninput="updateRadar()">
+    </div>
+    <div class="cr">
+      <div class="cl"><span>요격성공률(Pk)</span><span class="gn" id="pkLbl">75%</span></div>
+      <input type="range" id="pkSlider" min="0" max="100" value="75" oninput="updatePk()">
+    </div>
+  </div>
+
+  <div class="rbox">
+    <h3>▸ 카메라 제어</h3>
+    <div class="cam-grid">
+      <button class="cbtn" onclick="camZoomIn()">🔍 줌인</button>
+      <button class="cbtn" onclick="camZoomOut()">🔎 줌아웃</button>
+      <button class="cbtn" onclick="camTiltUp()">⬆ 고각+</button>
+      <button class="cbtn" onclick="camTiltDown()">⬇ 고각-</button>
+      <button class="cbtn" onclick="camRotL()">↺ 좌회전</button>
+      <button class="cbtn" onclick="camRotR()">↻ 우회전</button>
+    </div>
+    <div class="cam-grid">
+      <button class="cbtn" onclick="viewAll()">🌏 전체</button>
+      <button class="cbtn" onclick="view45()">📐 45°</button>
+      <button class="cbtn" onclick="viewH()">✈ 수평</button>
+      <button class="cbtn" onclick="viewBat()">🎯 포대</button>
+    </div>
+    <div class="cr" style="margin-top:5px">
+      <div class="cl"><span>재생속도</span><span class="yl" id="spdLbl">1×</span></div>
+      <input type="range" id="spdSlider" min="1" max="8" value="1" oninput="updateSpd()">
+    </div>
+  </div>
+</div>
+
+<div id="guide">
+  🖱 좌드래그: 지도이동<br>
+  🖱 우드래그: 시점기울기<br>
+  🖱 휠: 줌인/아웃<br>
+  🖱 Ctrl+드래그: 회전
+</div>
+
+<div id="controls">
+  <button class="btn r" onclick="spawnThreat('ballistic')">⚠ 탄도미사일</button>
+  <button class="btn o" onclick="spawnThreat('cruise')">◈ 순항미사일</button>
+  <button class="btn p" onclick="spawnThreat('hypersonic')">⚡ 극초음속</button>
+  <button class="btn" onclick="reloadAll()">↺ 재장전</button>
+  <button class="btn" onclick="resetSim()">■ 초기화</button>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  CESIUM 초기화
+// ═══════════════════════════════════════════════════════════
+Cesium.Ion.defaultAccessToken='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI3YTIzMzUyNi1iMzc4LTRhNzAtOTZkMi1kNjBjYWYwMTA0NDAiLCJpZCI6NDEzNTM4LCJpYXQiOjE3NzUyNjQ0MTJ9.qSkagM1v-8HG9ACbqK_ODu52FJ6g9Eb1l0qlvpZvI9Q';
+
+const viewer=new Cesium.Viewer('cesiumContainer',{
+  terrain:Cesium.Terrain.fromWorldTerrain(),
+  animation:false,baseLayerPicker:false,fullscreenButton:true,
+  geocoder:false,homeButton:true,infoBox:false,
+  sceneModePicker:false,selectionIndicator:false,
+  timeline:false,navigationHelpButton:true,
+  creditContainer:document.createElement('div'),
+});
+viewer.scene.globe.enableLighting=true;
+
+// ═══════════════════════════════════════════════════════════
+//  포대 설정 (의정부)
+// ═══════════════════════════════════════════════════════════
+const BAT={lon:127.03,lat:37.82,alt:150};
+const LAUNCHERS=[
+  {id:1,dLon:-0.0025,dLat:-0.0015,missiles:4,status:'READY'},
+  {id:2,dLon:+0.0025,dLat:-0.0015,missiles:4,status:'READY'},
+  {id:3,dLon:-0.0025,dLat:-0.0038,missiles:4,status:'READY'},
+  {id:4,dLon:+0.0025,dLat:-0.0038,missiles:4,status:'READY'},
+];
+
+// ═══════════════════════════════════════════════════════════
+//  전역 상태
+// ═══════════════════════════════════════════════════════════
+let radarAz=0, radarFovAz=60, radarFovEl=90, Pk=0.75, simSpd=1;
+let killCount=0, failCount=0, mCount=0;
+let threats=[], lastT=null;
+
+// ═══════════════════════════════════════════════════════════
+//  카메라
+// ═══════════════════════════════════════════════════════════
+viewer.camera.flyTo({
+  destination:Cesium.Cartesian3.fromDegrees(BAT.lon,BAT.lat-0.2,100000),
+  orientation:{heading:0,pitch:Cesium.Math.toRadians(-35),roll:0},duration:2
+});
+function camZoomIn(){viewer.camera.zoomIn(viewer.camera.positionCartographic.height*0.3);}
+function camZoomOut(){viewer.camera.zoomOut(viewer.camera.positionCartographic.height*0.4);}
+function camTiltUp(){viewer.camera.lookUp(Cesium.Math.toRadians(7));}
+function camTiltDown(){viewer.camera.lookDown(Cesium.Math.toRadians(7));}
+function camRotL(){viewer.camera.lookLeft(Cesium.Math.toRadians(12));}
+function camRotR(){viewer.camera.lookRight(Cesium.Math.toRadians(12));}
+function viewAll(){viewer.camera.flyTo({destination:Cesium.Cartesian3.fromDegrees(127.0,37.2,600000),
+  orientation:{heading:0,pitch:Cesium.Math.toRadians(-55),roll:0},duration:1.5});}
+function view45(){viewer.camera.flyTo({destination:Cesium.Cartesian3.fromDegrees(BAT.lon,BAT.lat-0.3,130000),
+  orientation:{heading:0,pitch:Cesium.Math.toRadians(-30),roll:0},duration:1.5});}
+function viewH(){viewer.camera.flyTo({destination:Cesium.Cartesian3.fromDegrees(BAT.lon-0.35,BAT.lat,60000),
+  orientation:{heading:Cesium.Math.toRadians(90),pitch:Cesium.Math.toRadians(-4),roll:0},duration:1.5});}
+function viewBat(){viewer.camera.flyTo({destination:Cesium.Cartesian3.fromDegrees(BAT.lon,BAT.lat-0.05,20000),
+  orientation:{heading:0,pitch:Cesium.Math.toRadians(-38),roll:0},duration:1.5});}
+function updateSpd(){simSpd=parseInt(document.getElementById('spdSlider').value);
+  document.getElementById('spdLbl').textContent=simSpd+'×';}
+
+// ═══════════════════════════════════════════════════════════
+//  3D 구면 부채꼴 레이더 범위
+//  → 위경도 오프셋 + 고각으로 구면 메쉬 생성
+// ═══════════════════════════════════════════════════════════
+const RADAR_ENT=[];
+function clearRadar(){RADAR_ENT.forEach(e=>{try{viewer.entities.remove(e);}catch(x){}});RADAR_ENT.length=0;}
+
+function buildRadar(){
+  clearRadar();
+  const cx=BAT.lon, cy=BAT.lat;
+  const R1=100000, R2=40000; // 탐지/요격 반경(m)
+  const azC=radarAz, azH=radarFovAz, elMax=radarFovEl;
+  const AZ_STEPS=48, EL_STEPS=24;
+
+  // 구면 부채꼴 메쉬 포지션 생성
+  // az: azC-azH ~ azC+azH (방위각)
+  // el: 0 ~ elMax (고각)
+  function sphereMesh(R, alpha){
+    const positions=[];
+    for(let ei=0;ei<=EL_STEPS;ei++){
+      const el=Cesium.Math.toRadians((elMax/EL_STEPS)*ei);
+      for(let ai=0;ai<=AZ_STEPS;ai++){
+        const az=Cesium.Math.toRadians(azC-azH+(2*azH/AZ_STEPS)*ai);
+        // 구면 → 지리 좌표 변환
+        const dLon=(R/111320)*Math.sin(az)*Math.cos(el);
+        const dLat=(R/110540)*Math.cos(az)*Math.cos(el);
+        const alt  =R*Math.sin(el);
+        positions.push(Cesium.Cartesian3.fromDegrees(cx+dLon,cy+dLat,alt));
+      }
+    }
+    return positions;
+  }
+
+  // 와이어프레임 라인으로 구면 부채꼴 표현
+  function addSectorLines(R, color, opacity){
+    // 경선 방향 (고각 변화)
+    for(let ai=0;ai<=AZ_STEPS;ai+=4){
+      const pts=[];
+      for(let ei=0;ei<=EL_STEPS;ei++){
+        const el=Cesium.Math.toRadians((elMax/EL_STEPS)*ei);
+        const az=Cesium.Math.toRadians(azC-azH+(2*azH/AZ_STEPS)*ai);
+        const dLon=(R/111320)*Math.sin(az)*Math.cos(el);
+        const dLat=(R/110540)*Math.cos(az)*Math.cos(el);
+        const alt=R*Math.sin(el);
+        pts.push(Cesium.Cartesian3.fromDegrees(cx+dLon,cy+dLat,alt));
+      }
+      const e=viewer.entities.add({polyline:{positions:pts,width:0.8,
+        material:Cesium.Color.fromCssColorString(color).withAlpha(opacity),
+        arcType:Cesium.ArcType.NONE}});
+      RADAR_ENT.push(e);
+    }
+    // 위선 방향 (방위각 변화)
+    for(let ei=0;ei<=EL_STEPS;ei+=6){
+      const pts=[];
+      for(let ai=0;ai<=AZ_STEPS;ai++){
+        const el=Cesium.Math.toRadians((elMax/EL_STEPS)*ei);
+        const az=Cesium.Math.toRadians(azC-azH+(2*azH/AZ_STEPS)*ai);
+        const dLon=(R/111320)*Math.sin(az)*Math.cos(el);
+        const dLat=(R/110540)*Math.cos(az)*Math.cos(el);
+        const alt=R*Math.sin(el);
+        pts.push(Cesium.Cartesian3.fromDegrees(cx+dLon,cy+dLat,alt));
+      }
+      const e=viewer.entities.add({polyline:{positions:pts,width:0.8,
+        material:Cesium.Color.fromCssColorString(color).withAlpha(opacity),
+        arcType:Cesium.ArcType.NONE}});
+      RADAR_ENT.push(e);
+    }
+    // 지면 부채꼴 외곽
+    const groundPts=[Cesium.Cartesian3.fromDegrees(cx,cy,10)];
+    for(let ai=0;ai<=AZ_STEPS;ai++){
+      const az=Cesium.Math.toRadians(azC-azH+(2*azH/AZ_STEPS)*ai);
+      const dLon=(R/111320)*Math.sin(az);
+      const dLat=(R/110540)*Math.cos(az);
+      groundPts.push(Cesium.Cartesian3.fromDegrees(cx+dLon,cy+dLat,10));
+    }
+    groundPts.push(Cesium.Cartesian3.fromDegrees(cx,cy,10));
+    const eg=viewer.entities.add({polyline:{positions:groundPts,width:1.2,
+      material:Cesium.Color.fromCssColorString(color).withAlpha(opacity*1.5),
+      arcType:Cesium.ArcType.NONE}});
+    RADAR_ENT.push(eg);
+
+    // 좌우 경계선 (포대→구면 가장자리)
+    for(const side of[-1,1]){
+      const bPts=[];
+      for(let ei=0;ei<=EL_STEPS;ei++){
+        const el=Cesium.Math.toRadians((elMax/EL_STEPS)*ei);
+        const az=Cesium.Math.toRadians(azC+side*azH);
+        const dLon=(R/111320)*Math.sin(az)*Math.cos(el);
+        const dLat=(R/110540)*Math.cos(az)*Math.cos(el);
+        const alt=R*Math.sin(el);
+        bPts.push(Cesium.Cartesian3.fromDegrees(cx+dLon,cy+dLat,alt));
+      }
+      bPts.unshift(Cesium.Cartesian3.fromDegrees(cx,cy,10));
+      const eb=viewer.entities.add({polyline:{positions:bPts,width:1.2,
+        material:Cesium.Color.fromCssColorString(color).withAlpha(opacity*1.8),
+        arcType:Cesium.ArcType.NONE}});
+      RADAR_ENT.push(eb);
+    }
+
+    // 반투명 채움 (폴리곤)
+    const fillPts=[];
+    for(let ei=0;ei<=EL_STEPS;ei+=2){
+      const el=Cesium.Math.toRadians((elMax/EL_STEPS)*ei);
+      for(let ai=0;ai<=AZ_STEPS;ai++){
+        const az=Cesium.Math.toRadians(azC-azH+(2*azH/AZ_STEPS)*ai);
+        const dLon=(R/111320)*Math.sin(az)*Math.cos(el);
+        const dLat=(R/110540)*Math.cos(az)*Math.cos(el);
+        const alt=R*Math.sin(el);
+        fillPts.push(Cesium.Cartesian3.fromDegrees(cx+dLon,cy+dLat,alt));
+      }
+    }
+  }
+
+  // 탐지범위 (파랑 100km)
+  addSectorLines(R1,'#0088ff',0.25);
+  // 요격범위 (초록 40km)
+  addSectorLines(R2,'#00ff88',0.45);
+
+  // 정면 빔 라인
+  const aRad=Cesium.Math.toRadians(azC);
+  const bLon=(R1/111320)*Math.sin(aRad);
+  const bLat=(R1/110540)*Math.cos(aRad);
+  const eb=viewer.entities.add({polyline:{
+    positions:[Cesium.Cartesian3.fromDegrees(cx,cy,500),
+               Cesium.Cartesian3.fromDegrees(cx+bLon,cy+bLat,500)],
+    width:1.5,
+    material:new Cesium.PolylineDashMaterialProperty({color:Cesium.Color.WHITE.withAlpha(0.3),dashLength:16}),
+    arcType:Cesium.ArcType.GEODESIC
+  }});
+  RADAR_ENT.push(eb);
+
+  // 방위각 표시
+  const dn=['북','북동','동','남동','남','남서','서','북서'];
+  document.getElementById('rAzTxt').textContent=String(radarAz).padStart(3,'0')+'°('+dn[Math.round(radarAz/45)%8]+')';
+}
+
+function updateRadar(){
+  radarAz   =parseInt(document.getElementById('azSlider').value);
+  radarFovAz=parseInt(document.getElementById('fovAzSlider').value);
+  radarFovEl=parseInt(document.getElementById('fovElSlider').value);
+  document.getElementById('azLbl').textContent   =String(radarAz).padStart(3,'0')+'°';
+  document.getElementById('fovAzLbl').textContent='±'+radarFovAz+'°';
+  document.getElementById('fovElLbl').textContent=radarFovEl+'°';
+  buildRadar();
+}
+function updatePk(){
+  Pk=parseInt(document.getElementById('pkSlider').value)/100;
+  document.getElementById('pkLbl').textContent=Math.round(Pk*100)+'%';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  포대 마커
+// ═══════════════════════════════════════════════════════════
+function buildMarkers(){
+  viewer.entities.add({id:'rm',position:Cesium.Cartesian3.fromDegrees(BAT.lon,BAT.lat,BAT.alt),
+    point:{pixelSize:14,color:Cesium.Color.fromCssColorString('#00ff88'),outlineColor:Cesium.Color.BLACK,outlineWidth:2},
+    label:{text:'레이더',font:'10px Share Tech Mono',fillColor:Cesium.Color.fromCssColorString('#00ff88'),
+      outlineColor:Cesium.Color.BLACK,outlineWidth:2,style:Cesium.LabelStyle.FILL_AND_OUTLINE,
+      pixelOffset:new Cesium.Cartesian2(20,0),disableDepthTestDistance:Number.POSITIVE_INFINITY}});
+  viewer.entities.add({id:'ecs',position:Cesium.Cartesian3.fromDegrees(BAT.lon,BAT.lat-0.002,BAT.alt),
+    point:{pixelSize:10,color:Cesium.Color.fromCssColorString('#ffcc00'),outlineColor:Cesium.Color.BLACK,outlineWidth:2},
+    label:{text:'ECS',font:'9px Share Tech Mono',fillColor:Cesium.Color.fromCssColorString('#ffcc00'),
+      outlineColor:Cesium.Color.BLACK,outlineWidth:2,style:Cesium.LabelStyle.FILL_AND_OUTLINE,
+      pixelOffset:new Cesium.Cartesian2(16,0),disableDepthTestDistance:Number.POSITIVE_INFINITY}});
+  LAUNCHERS.forEach(l=>{
+    viewer.entities.add({id:`ln${l.id}`,
+      position:Cesium.Cartesian3.fromDegrees(BAT.lon+l.dLon,BAT.lat+l.dLat,BAT.alt),
+      point:{pixelSize:9,color:Cesium.Color.fromCssColorString('#ff8800'),outlineColor:Cesium.Color.BLACK,outlineWidth:2},
+      label:{text:`발사대${l.id}`,font:'8px Share Tech Mono',fillColor:Cesium.Color.fromCssColorString('#ff8800'),
+        outlineColor:Cesium.Color.BLACK,outlineWidth:2,style:Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset:new Cesium.Cartesian2(16,0),disableDepthTestDistance:Number.POSITIVE_INFINITY}});
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  HUD 업데이트
+// ═══════════════════════════════════════════════════════════
+function updateHUD(){
+  let total=0;
+  document.getElementById('lHUD').innerHTML=LAUNCHERS.map(l=>{
+    total+=l.missiles;
+    const pips=Array(4).fill(0).map((_,i)=>{
+      const c=i<l.missiles?(l.status==='RELOAD'?'pip r':'pip'):'pip e';
+      return `<div class="${c}"></div>`;
+    }).join('');
+    const sc=l.status==='READY'?'gn':l.status==='FIRING'?'rd':'yl';
+    return `<div class="lrow"><span class="lnm">발사대${l.id}</span><div class="pips">${pips}</div><span class="lst ${sc}">${l.status}</span></div>`;
+  }).join('');
+  document.getElementById('totalM').textContent=total+'발';
+  document.getElementById('killC').textContent=killCount;
+  document.getElementById('failC').textContent=failCount;
+}
+
+let alertTO2;
+function showAlert(msg,isFail=false){
+  const id=isFail?'failBanner':'alert';
+  document.getElementById(id).textContent=msg;
+  document.getElementById(id).style.display='block';
+  clearTimeout(alertTO2);
+  alertTO2=setTimeout(()=>document.getElementById(id).style.display='none',isFail?4000:2500);
+}
+function addLog(msg,col='#00ff88'){
+  const el=document.getElementById('log');
+  const t=new Date().toISOString().substr(11,8);
+  el.innerHTML=`<div style="color:${col};margin-bottom:1px">[${t}] ${msg}</div>`+el.innerHTML;
+  while(el.children.length>14)el.removeChild(el.lastChild);
+}
+function doFlash(red=false){
+  const id=red?'flashR':'flash';
+  document.getElementById(id).classList.add('on');
+  setTimeout(()=>document.getElementById(id).classList.remove('on'),120);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  탐지 범위 체크 (3D 구면 부채꼴)
+// ═══════════════════════════════════════════════════════════
+function inDetectSector(pos, R){
+  const batPos=Cesium.Cartesian3.fromDegrees(BAT.lon,BAT.lat,BAT.alt);
+  const dist=Cesium.Cartesian3.distance(batPos,pos);
+  if(dist>R) return false;
+
+  // 포대→위협 벡터를 지역 ENU로 변환
+  const enu=Cesium.Transforms.eastNorthUpToFixedFrame(batPos);
+  const inv=Cesium.Matrix4.inverse(enu,new Cesium.Matrix4());
+  const local=Cesium.Matrix4.multiplyByPoint(inv,pos,new Cesium.Cartesian3());
+
+  // ENU: x=동, y=북, z=위
+  const az=Cesium.Math.toDegrees(Math.atan2(local.x,local.y)); // 방위각
+  const el=Cesium.Math.toDegrees(Math.atan2(local.z,Math.sqrt(local.x*local.x+local.y*local.y))); // 고각
+
+  const azDiff=((az-radarAz+540)%360)-180; // -180~180
+  if(Math.abs(azDiff)>radarFovAz) return false;
+  if(el<0||el>radarFovEl) return false;
+  return true;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  위협 생성
+// ═══════════════════════════════════════════════════════════
+function spawnThreat(type){
+  mCount++;
+  let fLon,fLat,fAlt,spd,col,name,isHyp,isBal;
+
+  if(type==='ballistic'){
+    fLon=124.5+Math.random()*4; fLat=39.0+Math.random()*2.5;
+    fAlt=200; spd=700; col='#ff4444'; name=`BM-${1000+mCount}`; isBal=true; isHyp=false;
+  } else if(type==='cruise'){
+    fLon=123.5+Math.random()*2; fLat=37.2+Math.random()*2;
+    fAlt=2500; spd=250; col='#ff8800'; name=`CM-${200+mCount}`; isBal=false; isHyp=false;
+  } else {
+    fLon=124.5+Math.random()*3; fLat=39.5+Math.random()*1.5;
+    fAlt=28000; spd=2000; col='#cc44ff'; name=`HM-${500+mCount}`; isBal=false; isHyp=true;
+  }
+
+  const tLon=BAT.lon+(Math.random()-0.5)*0.04;
+  const tLat=BAT.lat+(Math.random()-0.5)*0.04;
+
+  // 위협 위치: Cartesian3 직접 관리
+  const startPos=Cesium.Cartesian3.fromDegrees(fLon,fLat,fAlt);
+  const endPos  =Cesium.Cartesian3.fromDegrees(tLon,tLat,0);
+  const totalDist=Cesium.Cartesian3.distance(startPos,endPos);
+
+  // 속도 벡터 초기화
+  const dirVec=Cesium.Cartesian3.subtract(endPos,startPos,new Cesium.Cartesian3());
+  Cesium.Cartesian3.normalize(dirVec,dirVec);
+  Cesium.Cartesian3.multiplyByScalar(dirVec,spd,dirVec);
+
+  const willKill=Math.random()<(isHyp?Pk*0.35:type==='cruise'?Math.min(Pk+0.1,0.98):Pk);
+
+  const th={
+    name,type,col,isBal,isHyp,
+    pos:startPos.clone(),
+    vel:dirVec.clone(),       // 속도벡터 (m/s)
+    spd,                      // 속도 크기
+    startPos,endPos,totalDist,
+    fLon,fLat,fAlt,tLon,tLat,
+    willKill,
+    state:'flying',           // flying|detected|engaging|intercepted|failFlight|done
+    detected:false,
+    interceptorFired:false,
+    interceptor:null,
+    entity:null,
+    trailPts:[startPos.clone()],
+    trailEnt:null,
+    evasionT:0,               // 극초음속 회피 타이머
+  };
+
+  // 엔티티 생성
+  th.entity=viewer.entities.add({
+    position:startPos.clone(),
+    point:{pixelSize:11,color:Cesium.Color.fromCssColorString(col),
+      outlineColor:Cesium.Color.WHITE,outlineWidth:1.5},
+    label:{text:name,font:'9px Share Tech Mono',
+      fillColor:Cesium.Color.fromCssColorString(col),
+      outlineColor:Cesium.Color.BLACK,outlineWidth:2,
+      style:Cesium.LabelStyle.FILL_AND_OUTLINE,
+      pixelOffset:new Cesium.Cartesian2(0,-17),
+      disableDepthTestDistance:Number.POSITIVE_INFINITY},
+  });
+  th.trailEnt=viewer.entities.add({
+    polyline:{
+      positions:new Cesium.CallbackProperty(()=>th.trailPts.length>1?th.trailPts:[startPos,startPos],false),
+      width:2,
+      material:new Cesium.PolylineGlowMaterialProperty({
+        glowPower:0.18,color:Cesium.Color.fromCssColorString(col).withAlpha(0.8)}),
+      arcType:Cesium.ArcType.NONE,
+    }
+  });
+
+  threats.push(th);
+  addLog(`발사 탐지: ${name}`,col);
+  showAlert(`⚠ 위협 발사 — ${name}`);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  요격 미사일 발사
+// ═══════════════════════════════════════════════════════════
+function fireInterceptor(th){
+  const launcher=LAUNCHERS.find(l=>l.missiles>0&&l.status==='READY');
+  if(!launcher){addLog('⚠ 가용 미사일 없음!','#ff4444');return;}
+  launcher.status='FIRING'; launcher.missiles--;
+  updateHUD();
+
+  const lLon=BAT.lon+launcher.dLon, lLat=BAT.lat+launcher.dLat;
+  const iStartPos=Cesium.Cartesian3.fromDegrees(lLon,lLat,BAT.alt+10);
+
+  // 초기 속도: 수직 상승 (부스터)
+  const upVec=new Cesium.Cartesian3(0,0,1200); // 수직 상승 1200m/s
+  // 지구 표면 법선 방향으로 변환
+  const surfNorm=Cesium.Ellipsoid.WGS84.geodeticSurfaceNormal(iStartPos,new Cesium.Cartesian3());
+  const iVel=Cesium.Cartesian3.multiplyByScalar(surfNorm,1200,new Cesium.Cartesian3());
+
+  th.interceptor={
+    pos:iStartPos.clone(),
+    vel:iVel.clone(),
+    spd:1500,           // 요격미사일 속도 1500m/s
+    boostTime:2.0,      // 부스터 시간(초) — 수직 상승
+    t:0,                // 경과 시간
+    entity:null,
+    trailPts:[iStartPos.clone()],
+    trailEnt:null,
+    launcher,
+  };
+
+  th.interceptor.entity=viewer.entities.add({
+    position:iStartPos.clone(),
+    point:{pixelSize:8,color:Cesium.Color.fromCssColorString('#00ff88'),
+      outlineColor:Cesium.Color.WHITE,outlineWidth:1},
+  });
+  th.interceptor.trailEnt=viewer.entities.add({
+    polyline:{
+      positions:new Cesium.CallbackProperty(()=>
+        th.interceptor.trailPts.length>1?th.interceptor.trailPts:[iStartPos,iStartPos],false),
+      width:2,
+      material:new Cesium.PolylineGlowMaterialProperty({
+        glowPower:0.35,color:Cesium.Color.fromCssColorString('#00ff88').withAlpha(0.95)}),
+      arcType:Cesium.ArcType.NONE,
+    }
+  });
+
+  addLog(`요격 발사 ← 발사대${launcher.id}: ${th.name}`,'#00ff88');
+  setTimeout(()=>{launcher.status='READY';updateHUD();},3000);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  폭발 이펙트
+// ═══════════════════════════════════════════════════════════
+function explode(pos,big=false){
+  doFlash(big);
+  const sz=big?30000:7000;
+  const col=big?'#ff2200':'#ff8800';
+  const e=viewer.entities.add({position:pos,
+    ellipsoid:{radii:new Cesium.Cartesian3(sz,sz,sz),
+      material:Cesium.Color.fromCssColorString(col).withAlpha(0.8),
+      outline:true,outlineColor:Cesium.Color.WHITE.withAlpha(0.6)}});
+  const r=viewer.entities.add({position:pos,
+    ellipse:{semiMajorAxis:sz*1.6,semiMinorAxis:sz*1.6,
+      material:Cesium.Color.fromCssColorString('#ffcc00').withAlpha(0.55),
+      outline:true,outlineColor:Cesium.Color.fromCssColorString('#ff4400'),height:0}});
+  let op=0.8;
+  const fd=setInterval(()=>{
+    op-=0.055; if(op<=0){clearInterval(fd);
+      try{viewer.entities.remove(e);viewer.entities.remove(r);}catch(x){}}
+  },55);
+}
+function remEnt(e){try{if(e)viewer.entities.remove(e);}catch(x){}}
+
+// ═══════════════════════════════════════════════════════════
+//  PNG 비례항법 유도 함수
+//  N: 항법상수(3~5), vel: 현재속도벡터, los: 시선벡터, dt: 시간
+// ═══════════════════════════════════════════════════════════
+function pngGuide(vel, targetPos, myPos, spd, dt, N=4){
+  // 시선벡터 (LOS: Line Of Sight)
+  const los=Cesium.Cartesian3.subtract(targetPos,myPos,new Cesium.Cartesian3());
+  const losDist=Cesium.Cartesian3.magnitude(los);
+  if(losDist<1) return vel;
+
+  const losNorm=Cesium.Cartesian3.normalize(los,new Cesium.Cartesian3());
+
+  // 현재 속도방향
+  const velNorm=Cesium.Cartesian3.normalize(vel,new Cesium.Cartesian3());
+
+  // LOS와 현재 속도방향의 각도 오차
+  const dot=Cesium.Cartesian3.dot(velNorm,losNorm);
+  const clampedDot=Math.max(-1,Math.min(1,dot));
+  const angleErr=Math.acos(clampedDot);
+
+  if(angleErr<0.001) return vel; // 이미 정렬됨
+
+  // 회전축 (velNorm × losNorm)
+  const axis=Cesium.Cartesian3.cross(velNorm,losNorm,new Cesium.Cartesian3());
+  if(Cesium.Cartesian3.magnitude(axis)<0.0001) return vel;
+  Cesium.Cartesian3.normalize(axis,axis);
+
+  // 최대 선회율 제한 (rad/s) — 실제 PAC-3 약 20G 기동
+  const maxTurnRate=Cesium.Math.toRadians(N*30)*dt;
+  const turnAngle=Math.min(angleErr*N*dt, maxTurnRate);
+
+  // 로드리게스 회전 공식
+  const cosA=Math.cos(turnAngle), sinA=Math.sin(turnAngle);
+  const newVelNorm=new Cesium.Cartesian3(
+    velNorm.x*cosA + (axis.y*velNorm.z-axis.z*velNorm.y)*sinA + axis.x*Cesium.Cartesian3.dot(axis,velNorm)*(1-cosA),
+    velNorm.y*cosA + (axis.z*velNorm.x-axis.x*velNorm.z)*sinA + axis.y*Cesium.Cartesian3.dot(axis,velNorm)*(1-cosA),
+    velNorm.z*cosA + (axis.x*velNorm.y-axis.y*velNorm.x)*sinA + axis.z*Cesium.Cartesian3.dot(axis,velNorm)*(1-cosA),
+  );
+
+  return Cesium.Cartesian3.multiplyByScalar(newVelNorm,spd,new Cesium.Cartesian3());
+}
+
+// ═══════════════════════════════════════════════════════════
+//  메인 루프
+// ═══════════════════════════════════════════════════════════
+viewer.scene.preUpdate.addEventListener(()=>{
+  const now=performance.now();
+  if(!lastT){lastT=now;return;}
+  const dt=Math.min((now-lastT)/1000,0.08)*simSpd;
+  lastT=now;
+
+  for(let i=threats.length-1;i>=0;i--){
+    const th=threats[i];
+    if(th.state==='done'){threats.splice(i,1);continue;}
+
+    // ── 위협 이동 ───────────────────────────────────────────
+    // 탄도미사일: 중력 효과 추가
+    if(th.isBal){
+      // 중력 방향 (지구 중심 방향)
+      const gravDir=Cesium.Cartesian3.negate(
+        Cesium.Ellipsoid.WGS84.geodeticSurfaceNormal(th.pos,new Cesium.Cartesian3()),
+        new Cesium.Cartesian3());
+      const grav=Cesium.Cartesian3.multiplyByScalar(gravDir,9.8*dt*simSpd,new Cesium.Cartesian3());
+      Cesium.Cartesian3.add(th.vel,grav,th.vel);
+    }
+
+    // 극초음속: S자 회피기동 (목표까지 거리에 따라)
+    if(th.isHyp){
+      th.evasionT+=dt*simSpd;
+      const batPos=Cesium.Cartesian3.fromDegrees(BAT.lon,BAT.lat,BAT.alt);
+      const distToBat=Cesium.Cartesian3.distance(th.pos,batPos);
+      const evasAmp=Math.min(distToBat/50000,1)*150; // 가까울수록 회피 줄임
+      const enu=Cesium.Transforms.eastNorthUpToFixedFrame(th.pos);
+      const eastVec=new Cesium.Cartesian3(enu[0],enu[1],enu[2]);
+      const evasion=Cesium.Cartesian3.multiplyByScalar(eastVec,
+        Math.sin(th.evasionT*2.5)*evasAmp,new Cesium.Cartesian3());
+      Cesium.Cartesian3.add(th.vel,evasion,th.vel);
+      // 속도 크기 유지
+      const vLen=Cesium.Cartesian3.magnitude(th.vel);
+      if(vLen>0) Cesium.Cartesian3.multiplyByScalar(
+        Cesium.Cartesian3.normalize(th.vel,new Cesium.Cartesian3()),th.spd,th.vel);
+    }
+
+    // 위치 업데이트
+    const move=Cesium.Cartesian3.multiplyByScalar(th.vel,dt,new Cesium.Cartesian3());
+    Cesium.Cartesian3.add(th.pos,move,th.pos);
+
+    // 고도 체크 (지면 도달)
+    const carto=Cesium.Cartographic.fromCartesian(th.pos);
+    if(carto.height<=0&&(th.state==='flying'||th.state==='failFlight')){
+      th.pos=Cesium.Cartesian3.fromDegrees(
+        Cesium.Math.toDegrees(carto.longitude),
+        Cesium.Math.toDegrees(carto.latitude),0);
+      explode(th.pos,true);
+      remEnt(th.entity); remEnt(th.trailEnt);
+      addLog(`💥 ${th.state==='failFlight'?'요격실패→':'방어실패→'} 타격: ${th.name}`,'#ff0000');
+      if(th.state==='failFlight') failCount++;
+      updateHUD(); th.state='done'; continue;
+    }
+
+    if(th.entity) th.entity.position=th.pos.clone();
+    th.trailPts.push(th.pos.clone());
+    if(th.trailPts.length>80) th.trailPts.shift();
+
+    // ── 탐지 체크 (100km 구면 부채꼴 진입) ─────────────────
+    if(!th.detected&&th.state==='flying'){
+      if(inDetectSector(th.pos,100000)){
+        th.detected=true; th.state='detected';
+        addLog(`탐지: ${th.name} — 교전 준비`,th.col);
+        showAlert(`⚠ 탐지: ${th.name}`);
+      }
+    }
+
+    // ── 요격 체크 (40km 구면 부채꼴 진입) ──────────────────
+    if(th.detected&&!th.interceptorFired&&th.state==='detected'){
+      if(inDetectSector(th.pos,40000)){
+        th.interceptorFired=true; th.state='engaging';
+        addLog(`요격사거리 진입: ${th.name} — 요격 미사일 발사!`,'#00ff88');
+        fireInterceptor(th);
+      }
+    }
+
+    // ── 요격 미사일 이동 (PNG 유도) ─────────────────────────
+    if(th.interceptor&&(th.state==='engaging'||th.state==='detected')){
+      const intc=th.interceptor;
+      intc.t+=dt;
+
+      if(intc.t<intc.boostTime){
+        // 부스터 단계: 수직 상승 유지
+        const surfN=Cesium.Ellipsoid.WGS84.geodeticSurfaceNormal(intc.pos,new Cesium.Cartesian3());
+        intc.vel=Cesium.Cartesian3.multiplyByScalar(surfN,intc.spd,new Cesium.Cartesian3());
+      } else {
+        // 유도 단계: PNG — 위협 현재 위치 추적
+        intc.vel=pngGuide(intc.vel,th.pos,intc.pos,intc.spd,dt,4.5);
+      }
+
+      const iMove=Cesium.Cartesian3.multiplyByScalar(intc.vel,dt,new Cesium.Cartesian3());
+      Cesium.Cartesian3.add(intc.pos,iMove,intc.pos);
+
+      if(intc.entity) intc.entity.position=intc.pos.clone();
+      intc.trailPts.push(intc.pos.clone());
+      if(intc.trailPts.length>50) intc.trailPts.shift();
+
+      // ── 충돌 판정 ────────────────────────────────────────
+      const dist=Cesium.Cartesian3.distance(intc.pos,th.pos);
+      const killR=th.isHyp?900:500; // 킬반경
+
+      if(dist<killR){
+        const hitPos=th.pos.clone();
+        if(th.willKill){
+          // ✅ 요격 성공
+          explode(hitPos,false);
+          remEnt(th.entity); remEnt(th.trailEnt);
+          remEnt(intc.entity); remEnt(intc.trailEnt);
+          killCount++;
+          addLog(`✓ 요격 성공: ${th.name}`,'#00ff88');
+          th.state='done';
+        } else {
+          // ❌ 요격 실패 — 위협 계속 비행
+          remEnt(intc.entity); remEnt(intc.trailEnt);
+          th.interceptor=null;
+          th.state='failFlight';
+          failCount++;
+          addLog(`✗ 요격 실패: ${th.name} — 계속 비행!`,'#ff4444');
+          showAlert(`💥 요격 실패 — ${th.name}!`,true);
+        }
+        updateHUD();
+      }
+
+      // 요격 미사일 고도 체크 (지면 도달 시 제거)
+      const iCarto=Cesium.Cartographic.fromCartesian(intc.pos);
+      if(iCarto.height<0){
+        remEnt(intc.entity); remEnt(intc.trailEnt);
+        th.interceptor=null;
+      }
+    }
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+//  버튼 함수
+// ═══════════════════════════════════════════════════════════
+function reloadAll(){
+  LAUNCHERS.forEach(l=>{l.missiles=4;l.status='READY';});
+  updateHUD(); addLog('전체 재장전 완료 — 16발');
+}
+function resetSim(){
+  threats.forEach(th=>{
+    remEnt(th.entity); remEnt(th.trailEnt);
+    if(th.interceptor){remEnt(th.interceptor.entity);remEnt(th.interceptor.trailEnt);}
+  });
+  threats=[]; killCount=0; failCount=0; mCount=0;
+  LAUNCHERS.forEach(l=>{l.missiles=4;l.status='READY';});
+  updateHUD(); addLog('시뮬레이션 초기화');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  초기화
+// ═══════════════════════════════════════════════════════════
+buildRadar();
+buildMarkers();
+updateHUD();
+addLog('PAT Battery Alpha 초기화 완료');
+addLog('레이더 방향: 북(000°) — 탐지각: ±60°');
+addLog('발사대 4문 Ready — 16발 장전');
+</script>
+</body>
+</html>
