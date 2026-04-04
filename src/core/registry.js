@@ -115,4 +115,13 @@ export class Registry {
   getThreatType(threatTypeId) {
     return this._threats[threatTypeId] || null;
   }
+
+  /**
+   * C2 타입 정보를 반환한다.
+   * @param {string} c2TypeId
+   * @returns {Object|null}
+   */
+  getC2Type(c2TypeId) {
+    return this._c2s[c2TypeId] || null;
+  }
 }

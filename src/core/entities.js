@@ -127,6 +127,23 @@ export class SensorEntity extends BaseEntity {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  C2Entity
+// ═══════════════════════════════════════════════════════════
+
+export class C2Entity extends BaseEntity {
+  /**
+   * @param {string} id
+   * @param {string} typeId - C2_TYPES 키
+   * @param {{lon:number, lat:number, alt:number}} position
+   */
+  constructor(id, typeId, position) {
+    super(id, typeId, position);
+    this.pendingTracks = [];
+    this.engagementPlan = [];
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  ThreatEntity
 // ═══════════════════════════════════════════════════════════
 

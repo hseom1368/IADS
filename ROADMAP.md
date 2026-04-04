@@ -32,10 +32,10 @@
 - [x] `core/entities.js`: InterceptorEntity (PNG 유도, 부스터+유도 단계)
 
 ### 1.3 시뮬레이션 엔진
-- [ ] `core/sim-engine.js`: SimEngine 클래스 — requestAnimationFrame 루프
-- [ ] step(dt) 구현: 위협이동 → 센서탐지 → 교전판정 → 요격미사일유도 → 충돌판정
-- [ ] 이벤트 버스: EventEmitter 패턴 (on/emit/off)
-- [ ] 시뮬레이션 상태 머신: READY → RUNNING → PAUSED → COMPLETE
+- [x] `core/sim-engine.js`: SimEngine 클래스 — requestAnimationFrame 루프
+- [x] step(dt) 구현: 위협이동 → 센서탐지 → 교전판정 → 요격미사일유도 → 충돌판정
+- [x] 이벤트 버스: EventEmitter 패턴 (on/emit/off)
+- [x] 시뮬레이션 상태 머신: READY → RUNNING → PAUSED → COMPLETE
 
 ### 1.4 3D 시각화 (L-SAM 1세트)
 - [ ] `viz/cesium-app.js`: Viewer 초기화, 의정부 지역 카메라
