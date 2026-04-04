@@ -38,12 +38,12 @@
 - [x] 시뮬레이션 상태 머신: READY → RUNNING → PAUSED → COMPLETE
 
 ### 1.4 3D 시각화 (L-SAM 1세트)
-- [ ] `viz/cesium-app.js`: Viewer 초기화, 의정부 지역 카메라
-- [ ] `viz/radar-viz.js`: L-SAM MFR 구면 부채꼴 와이어프레임 (patriot-sim.html 패턴)
-- [ ] `viz/engagement-viz.js`: 위협 궤적 렌더링 (빨간 점 + 꼬리)
-- [ ] `viz/engagement-viz.js`: 요격미사일 궤적 렌더링 (초록 점 + 꼬리)
-- [ ] `viz/engagement-viz.js`: 폭발 이펙트 (Ellipsoid 팽창+소멸)
-- [ ] `viz/hud.js`: 기본 HUD (포대 상태, 교전 로그)
+- [x] `viz/cesium-app.js`: Viewer 초기화, 의정부 지역 카메라
+- [x] `viz/radar-viz.js`: L-SAM MFR 구면 부채꼴 와이어프레임 (patriot-sim.html 패턴)
+- [x] `viz/engagement-viz.js`: 위협 궤적 렌더링 (빨간 점 + 꼬리)
+- [x] `viz/engagement-viz.js`: 요격미사일 궤적 렌더링 (초록 점 + 꼬리)
+- [x] `viz/engagement-viz.js`: 폭발 이펙트 (Ellipsoid 팽창+소멸)
+- [x] `viz/hud.js`: 기본 HUD (포대 상태, 교전 로그)
 
 ### 1.5 통합 + 데모
 - [ ] index.html에서 L-SAM 1세트 배치 + 탄도미사일 1발 발사 → 요격 시나리오 실행
