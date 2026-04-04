@@ -23,13 +23,13 @@
 - [x] `core/physics.js`: isInSector — 구면 부채꼴 탐지 판정 (ENU 변환) + 테스트
 
 ### 1.2 타입 레지스트리 + 엔티티 시스템
-- [ ] `config/weapon-data.js`: L-SAM_ABM + MSAM_MFR + SRBM 타입 정의 (capability + relations)
-- [ ] `core/registry.js`: Registry 클래스 — weapon-data 로딩, getPrioritizedShooters(), getDetectableThreats()
-- [ ] `core/entities.js`: BaseEntity 클래스 (id, typeId, position, operational)
-- [ ] `core/entities.js`: ShooterEntity (typeId로 Registry 참조, currentAmmo/status는 런타임 상태)
-- [ ] `core/entities.js`: SensorEntity (typeId로 Registry 참조, currentTracking은 런타임 상태)
-- [ ] `core/entities.js`: ThreatEntity (SRBM: Mach6, 3단계 비행프로파일)
-- [ ] `core/entities.js`: InterceptorEntity (PNG 유도, 부스터+유도 단계)
+- [x] `config/weapon-data.js`: L-SAM_ABM + MSAM_MFR + SRBM 타입 정의 (capability + relations)
+- [x] `core/registry.js`: Registry 클래스 — weapon-data 로딩, getPrioritizedShooters(), getDetectableThreats()
+- [x] `core/entities.js`: BaseEntity 클래스 (id, typeId, position, operational)
+- [x] `core/entities.js`: ShooterEntity (typeId로 Registry 참조, currentAmmo/status는 런타임 상태)
+- [x] `core/entities.js`: SensorEntity (typeId로 Registry 참조, currentTracking은 런타임 상태)
+- [x] `core/entities.js`: ThreatEntity (SRBM: Mach6, 3단계 비행프로파일)
+- [x] `core/entities.js`: InterceptorEntity (PNG 유도, 부스터+유도 단계)
 
 ### 1.3 시뮬레이션 엔진
 - [ ] `core/sim-engine.js`: SimEngine 클래스 — requestAnimationFrame 루프
