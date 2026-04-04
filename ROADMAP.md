@@ -11,10 +11,10 @@
 > 목표: 화면에서 탄도미사일이 날아오고, L-SAM이 요격하는 장면을 3D로 보여주기
 
 ### 1.0 프로젝트 스캐폴딩
-- [ ] 디렉토리 구조 생성 (ARCHITECTURE.md 기준)
-- [ ] package.json 생성 (vitest 의존성)
-- [ ] index.html 기본 Cesium Viewer 초기화
-- [ ] patriot-sim.html에서 Cesium 초기화 패턴, CSS, HUD 레이아웃 추출
+- [x] 디렉토리 구조 생성 (ARCHITECTURE.md 기준)
+- [x] package.json 생성 (vitest 의존성)
+- [x] index.html 기본 Cesium Viewer 초기화
+- [x] patriot-sim.html에서 Cesium 초기화 패턴, CSS, HUD 레이아웃 추출
 
 ### 1.1 물리 엔진 기초
 - [ ] `core/physics.js`: slantRange(pos1, pos2) 구현 + 테스트

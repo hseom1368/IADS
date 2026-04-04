@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>KIDA ADSIM v2.0 — 통합방공체계 C2 아키텍처 비교 M&S</title>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body,#cesiumContainer{width:100%;height:100%;overflow:hidden;}
+  .cesium-viewer-bottom{display:none!important;}
+
+  /* ── 좌측 HUD 패널 ── */
+  #hud{position:absolute;top:12px;left:12px;width:230px;font-family:'Share Tech Mono',monospace;z-index:100;}
+  .hbox{background:rgba(0,4,2,0.91);border:1px solid rgba(0,255,136,0.28);padding:10px 13px;margin-bottom:5px;}
+  .hbox h3{font-family:'Orbitron',sans-serif;font-size:7px;letter-spacing:3px;color:#00ff88;
+    margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid rgba(0,255,136,0.15);}
+  .row{display:flex;justify-content:space-between;font-size:9px;margin-bottom:4px;}
+  .lbl{color:rgba(0,255,136,0.5);}
+  .gn{color:#00ff88;font-weight:bold;} .rd{color:#ff4444;font-weight:bold;}
+  .yl{color:#ffcc00;font-weight:bold;} .bl{color:#44aaff;font-weight:bold;}
+  .or{color:#ff8800;font-weight:bold;} .pu{color:#cc44ff;font-weight:bold;}
+
+  /* 발사대 pip 상태 표시 */
+  .lrow{display:flex;align-items:center;gap:5px;font-size:9px;margin-bottom:5px;}
+  .lnm{color:rgba(0,255,136,0.55);width:52px;}
+  .pips{display:flex;gap:2px;}
+  .pip{width:8px;height:8px;border-radius:1px;background:#00ff88;border:1px solid rgba(0,255,136,0.35);}
+  .pip.e{background:rgba(0,255,136,0.07);border-color:rgba(0,255,136,0.12);}
+  .pip.r{background:#ffcc00;}
+  .lst{font-size:7px;margin-left:auto;}
+
+  /* 교전 로그 */
+  #log{font-size:8px;color:rgba(0,255,136,0.45);max-height:85px;overflow-y:auto;line-height:1.55;}
+  #log::-webkit-scrollbar{width:2px;}
+  #log::-webkit-scrollbar-thumb{background:rgba(0,255,136,0.25);}
+
+  /* ── 우측 패널 ── */
+  #rightPanel{position:absolute;top:12px;right:12px;width:175px;font-family:'Share Tech Mono',monospace;z-index:100;}
+  .rbox{background:rgba(0,4,2,0.91);border:1px solid rgba(0,255,136,0.28);padding:10px 13px;margin-bottom:5px;}
+  .rbox h3{font-family:'Orbitron',sans-serif;font-size:7px;letter-spacing:2px;color:#00ff88;
+    margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid rgba(0,255,136,0.15);}
+  .cr{margin-bottom:7px;}
+  .cl{font-size:8px;color:rgba(0,255,136,0.55);display:flex;justify-content:space-between;margin-bottom:3px;}
+  input[type=range]{width:100%;accent-color:#00ff88;height:3px;}
+
+  /* 카메라 버튼 */
+  .cam-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:5px;}
+  .cbtn{background:rgba(0,15,8,0.9);border:1px solid rgba(0,255,136,0.25);color:#00ff88;
+    font-family:'Share Tech Mono',monospace;font-size:8px;padding:5px 3px;
+    cursor:pointer;text-align:center;transition:all 0.15s;}
+  .cbtn:hover{background:rgba(0,255,136,0.12);}
+  .cbtn.w{grid-column:1/-1;}
+
+  /* ── 하단 컨트롤 ── */
+  #controls{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);display:flex;gap:6px;z-index:100;}
+  .btn{background:rgba(0,4,2,0.93);border:1px solid rgba(0,255,136,0.38);color:#00ff88;
+    font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;
+    padding:7px 11px;cursor:pointer;transition:all 0.18s;}
+  .btn:hover{background:rgba(0,255,136,0.1);box-shadow:0 0 8px rgba(0,255,136,0.2);}
+  .btn.r{border-color:rgba(255,68,68,0.38);color:#ff4444;}
+  .btn.r:hover{background:rgba(255,68,68,0.08);}
+  .btn.o{border-color:rgba(255,136,0,0.38);color:#ff8800;}
+  .btn.o:hover{background:rgba(255,136,0,0.08);}
+
+  /* ── 알림 배너 ── */
+  #alert{position:absolute;top:12px;left:50%;transform:translateX(-50%);
+    background:rgba(255,0,0,0.1);border:1px solid #ff4444;color:#ff4444;
+    font-family:'Orbitron',sans-serif;font-size:9px;letter-spacing:2px;
+    padding:5px 18px;display:none;z-index:200;pointer-events:none;
+    animation:ap 0.5s infinite;white-space:nowrap;}
+  @keyframes ap{0%,100%{opacity:1}50%{opacity:0.18}}
+
+  /* ── 플래시 효과 ── */
+  #flash{position:absolute;inset:0;pointer-events:none;background:rgba(255,200,0,0);transition:background 0.08s;}
+  #flash.on{background:rgba(255,200,0,0.06);}
+  #flashR{position:absolute;inset:0;pointer-events:none;background:rgba(255,0,0,0);transition:background 0.08s;}
+  #flashR.on{background:rgba(255,0,0,0.1);}
+
+  /* ── 조작 안내 ── */
+  #guide{position:absolute;bottom:62px;right:12px;
+    background:rgba(0,4,2,0.8);border:1px solid rgba(255,255,255,0.12);
+    color:rgba(255,255,255,0.38);font-family:'Share Tech Mono',monospace;
+    font-size:8px;padding:7px 10px;z-index:100;pointer-events:none;line-height:1.9;}
+</style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+<div id="flash"></div><div id="flashR"></div>
+<div id="alert">THREAT DETECTED</div>
+
+<!-- 좌측 HUD -->
+<div id="hud">
+  <div class="hbox">
+    <h3>&#9656; SYSTEM STATUS</h3>
+    <div class="row"><span class="lbl">아키텍처</span><span class="gn" id="archMode">LINEAR C2</span></div>
+    <div class="row"><span class="lbl">시뮬레이션</span><span class="yl" id="simState">READY</span></div>
+    <div class="row"><span class="lbl">시뮬시간</span><span class="bl" id="simTime">0.0s</span></div>
+  </div>
+  <div class="hbox">
+    <h3>&#9656; LAUNCHER STATUS</h3>
+    <div id="launcherHud"></div>
+  </div>
+  <div class="hbox">
+    <h3>&#9656; ENGAGEMENT LOG</h3>
+    <div id="log">시스템 대기 중</div>
+  </div>
+</div>
+
+<!-- 우측 패널 -->
+<div id="rightPanel">
+  <div class="rbox">
+    <h3>&#9656; CAMERA</h3>
+    <div class="cam-grid">
+      <button class="cbtn" id="btnOverhead">OVERHEAD</button>
+      <button class="cbtn" id="btnStandard">STANDARD</button>
+      <button class="cbtn" id="btnHorizontal">HORIZON</button>
+      <button class="cbtn" id="btnClose">CLOSE</button>
+    </div>
+    <div class="cr" style="margin-top:5px">
+      <div class="cl"><span>TIME SCALE</span><span class="yl" id="spdLbl">1x</span></div>
+      <input type="range" id="spdSlider" min="1" max="8" value="1">
+    </div>
+  </div>
+</div>
+
+<div id="guide">
+  DRAG: pan | R-DRAG: tilt | WHEEL: zoom | CTRL+DRAG: rotate
+</div>
+
+<div id="controls">
+  <button class="btn r" id="btnFireThreat">FIRE THREAT</button>
+  <button class="btn" id="btnReset">RESET</button>
+</div>
+
+<script type="module" src="./viz/cesium-app.js"></script>
+</body>
+</html>
