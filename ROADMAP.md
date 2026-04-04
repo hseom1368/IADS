@@ -17,10 +17,10 @@
 - [x] patriot-sim.html에서 Cesium 초기화 패턴, CSS, HUD 레이아웃 추출
 
 ### 1.1 물리 엔진 기초
-- [ ] `core/physics.js`: slantRange(pos1, pos2) 구현 + 테스트
-- [ ] `core/physics.js`: ballisticTrajectory — 중력 포물선 궤적 구현 + 테스트
-- [ ] `core/physics.js`: pngGuidance — patriot-sim.html의 pngGuide 함수 모듈화 + 테스트
-- [ ] `core/physics.js`: isInSector — 구면 부채꼴 탐지 판정 (ENU 변환) + 테스트
+- [x] `core/physics.js`: slantRange(pos1, pos2) 구현 + 테스트
+- [x] `core/physics.js`: ballisticTrajectory — 중력 포물선 궤적 구현 + 테스트
+- [x] `core/physics.js`: pngGuidance — patriot-sim.html의 pngGuide 함수 모듈화 + 테스트
+- [x] `core/physics.js`: isInSector — 구면 부채꼴 탐지 판정 (ENU 변환) + 테스트
 
 ### 1.2 타입 레지스트리 + 엔티티 시스템
 - [ ] `config/weapon-data.js`: L-SAM_ABM + MSAM_MFR + SRBM 타입 정의 (capability + relations)
