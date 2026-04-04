@@ -131,5 +131,4 @@ function _bindCameraButtons() {
   }
 }
 
-// ── 자동 초기화 ──
-initViewer();
+// 자동 초기화 제거 — main.js에서 명시적으로 initViewer() 호출

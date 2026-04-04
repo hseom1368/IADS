@@ -100,8 +100,8 @@ describe('Phase 1.0: 프로젝트 스캐폴딩', () => {
       expect(html).toMatch(/Orbitron/);
     });
 
-    it('cesium-app.js를 ES Module로 로드해야 한다', () => {
-      expect(html).toMatch(/type="module".*cesium-app\.js/);
+    it('main.js를 ES Module로 로드해야 한다', () => {
+      expect(html).toMatch(/type="module".*main\.js/);
     });
 
     it('HUD 컨테이너가 존재해야 한다', () => {
