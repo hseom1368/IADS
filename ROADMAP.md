@@ -18,13 +18,13 @@
 - [x] patriot-sim.html에서 Cesium 초기화 패턴, CSS, HUD 레이아웃 추출
 
 ### 1.1 물리 엔진 기초
-- [ ] `core/physics.js`: slantRange(pos1, pos2) 구현 + 테스트
-- [ ] `core/physics.js`: ballisticTrajectory — 중력 포물선 궤적 구현 + 테스트
-- [ ] `core/physics.js`: pngGuidance — patriot-sim.html의 pngGuide 함수 모듈화 + 테스트
-- [ ] `core/physics.js`: isInSector — 구면 부채꼴 탐지 판정 (ENU 변환) + 테스트
-- [ ] `core/physics.js`: predictInterceptPoint — 위협 궤적 예측 → 교전구역 내 요격 지점 산출 + 테스트
-- [ ] `core/physics.js`: calculateLaunchTime — 요격미사일 비행시간 역산 → 선제 발사 시점 + 테스트
-- [ ] `core/physics.js`: predictedPk — 예측 요격 지점 기준 의사결정용 Pk 계산 + 테스트
+- [x] `core/physics.js`: slantRange(pos1, pos2) 구현 + 테스트
+- [x] `core/physics.js`: ballisticTrajectory — 중력 포물선 궤적 구현 + 테스트
+- [x] `core/physics.js`: pngGuidance — patriot-sim.html의 pngGuide 함수 모듈화 + 테스트
+- [x] `core/physics.js`: isInSector — 구면 부채꼴 탐지 판정 (ENU 변환) + 테스트
+- [x] `core/physics.js`: predictInterceptPoint — 위협 궤적 예측 → 교전구역 내 요격 지점 산출 + 테스트
+- [x] `core/physics.js`: calculateLaunchTime — 요격미사일 비행시간 역산 → 선제 발사 시점 + 테스트
+- [x] `core/physics.js`: predictedPk — 예측 요격 지점 기준 의사결정용 Pk 계산 + 테스트
 
 ### 1.2 타입 레지스트리 + 엔티티 시스템
 - [ ] `config/weapon-data.js`: 탄도탄 대응 최소 구성 타입 정의

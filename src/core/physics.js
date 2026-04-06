@@ -261,41 +261,100 @@ export function isInSector(sensorPos, targetPos, azCenter, azHalf, elMax, maxRan
 }
 
 // ═══════════════════════════════════════════════════════════
-//  Phase 1.1 신규 물리 함수 (스텁 — 구현 예정)
+//  Phase 1.1 물리 함수
 // ═══════════════════════════════════════════════════════════
+
+const PREDICT_DT = 0.5;       // 전진 전파 시간 스텝 (초)
+const PREDICT_MAX_TIME = 600;  // 전진 전파 최대 시간 (초)
+const ARRIVAL_THRESHOLD = 1.0; // 도착 판정 거리 (km)
 
 /**
  * 위협 궤적을 예측하여 사수 교전 구역 내 요격 지점을 계산한다.
+ * ballisticTrajectory로 전진 전파하며 교전구역 진입 지점을 찾는다.
  * @param {{position:{lon:number,lat:number,alt:number}, velocity:{x:number,y:number,z:number}}} threat - 위협 현재 상태
  * @param {{position:{lon:number,lat:number,alt:number}, capability:{maxRange:number, minRange:number, maxAlt:number, minAlt:number}}} shooter - 사수 위치+능력
  * @returns {{lon:number, lat:number, alt:number}|null} 예측 요격지점 또는 null (교전 불가)
  */
 export function predictInterceptPoint(threat, shooter) {
-  // Phase 1.1에서 구현
-  throw new Error('Not implemented: predictInterceptPoint');
+  const cap = shooter.capability;
+
+  // 원본 변경 방지: 복사
+  let pos = { ...threat.position };
+  let vel = { ...threat.velocity };
+
+  for (let t = 0; t < PREDICT_MAX_TIME; t += PREDICT_DT) {
+    const result = ballisticTrajectory(pos, vel, PREDICT_DT);
+    pos = result.pos;
+    vel = result.vel;
+
+    // 지면 도달 → 교전 불가
+    if (pos.alt <= 0) return null;
+
+    const altKm = pos.alt / 1000;
+    const dist = slantRange(shooter.position, pos);
+
+    // 교전구역 판정: minRange ≤ dist ≤ maxRange AND minAlt ≤ altKm ≤ maxAlt
+    if (dist >= cap.minRange && dist <= cap.maxRange &&
+        altKm >= cap.minAlt && altKm <= cap.maxAlt) {
+      return { lon: pos.lon, lat: pos.lat, alt: pos.alt };
+    }
+  }
+
+  return null;
 }
 
 /**
- * 요격미사일 비행시간을 역산하여 선제 발사 시점을 결정한다.
+ * 요격미사일 비행시간을 역산하여 선제 발사 시점 오프셋을 결정한다.
  * @param {{position:{lon:number,lat:number,alt:number}, velocity:{x:number,y:number,z:number}}} threat
- * @param {{position:{lon:number,lat:number,alt:number}, capability:{interceptorSpeed:number}}} shooter
+ * @param {{position:{lon:number,lat:number,alt:number}, capability:{interceptorSpeed:number, boostTime?:number}}} shooter
  * @param {{lon:number, lat:number, alt:number}} interceptPoint - 예측 요격지점
- * @returns {number} 발사 시점 (simTime 기준, 초)
+ * @returns {number} 발사까지 대기 시간 (초, 0 = 즉시 발사)
  */
 export function calculateLaunchTime(threat, shooter, interceptPoint) {
-  // Phase 1.1에서 구현
-  throw new Error('Not implemented: calculateLaunchTime');
+  const cap = shooter.capability;
+
+  // 1. 요격미사일 비행시간 추정
+  const interceptDist = slantRange(shooter.position, interceptPoint);
+  const boostTime = cap.boostTime || 0;
+  const tInterceptor = (interceptDist * 1000) / cap.interceptorSpeed + boostTime;
+
+  // 2. 위협→요격지점 도달 시간 추정 (전진 전파)
+  let pos = { ...threat.position };
+  let vel = { ...threat.velocity };
+  let tThreat = 0;
+
+  for (let t = 0; t < PREDICT_MAX_TIME; t += PREDICT_DT) {
+    const result = ballisticTrajectory(pos, vel, PREDICT_DT);
+    pos = result.pos;
+    vel = result.vel;
+    tThreat += PREDICT_DT;
+
+    if (pos.alt <= 0) break;
+
+    const dist = slantRange(pos, interceptPoint);
+    if (dist < ARRIVAL_THRESHOLD) break;
+  }
+
+  // 3. 발사 오프셋 = 위협 도달시간 - 요격미사일 비행시간
+  return Math.max(0, tThreat - tInterceptor);
 }
 
 /**
  * 예측 요격지점에서의 Pk를 계산한다 (교전 의사결정용).
- * 거리, 고도, 위협 기동여부를 반영한 조정 Pk.
- * @param {{capability:{pkTable:Object, maxRange:number, minRange:number, maxAlt:number, minAlt:number}}} shooter
+ * weapon-specs 섹션 6.1: predicted_Pk = base_pk × range_factor × maneuver_penalty
+ * @param {{position:{lon:number,lat:number,alt:number}, capability:{pkTable:Object, maxRange:number}}} shooter
  * @param {{lon:number, lat:number, alt:number}} interceptPoint
- * @param {{typeId:string, velocity:{x:number,y:number,z:number}}} threat
+ * @param {{typeId:string, maneuvering?:boolean}} threat
  * @returns {number} 0~1 사이의 예측 Pk
  */
 export function predictedPk(shooter, interceptPoint, threat) {
-  // Phase 1.1에서 구현
-  throw new Error('Not implemented: predictedPk');
+  const cap = shooter.capability;
+  const basePk = (cap.pkTable && cap.pkTable[threat.typeId]) || 0;
+  if (basePk === 0) return 0;
+
+  const dIntercept = slantRange(shooter.position, interceptPoint);
+  const rangeFactor = Math.max(0, 1 - (dIntercept / cap.maxRange) ** 2);
+  const maneuverPenalty = threat.maneuvering ? 0.85 : 1.0;
+
+  return basePk * rangeFactor * maneuverPenalty;
 }
