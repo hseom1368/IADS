@@ -38,13 +38,46 @@ export const SHOOTER_TYPES = deepFreeze({
       interceptMethod: 'hit-to-kill',
       interceptorSpeed: 1500, // m/s
       boostTime: 2.0,         // s (수직 발사 부스트)
-      navConstant: 4.5        // PNG 항법상수 N
+      navConstant: 4.5,       // PNG 항법상수 N
+      killRadius: 0.5,        // km (직격파괴)
+      warheadEffectiveness: 1.0
     },
     relations: {
+      priority: 'ABM_FIRST',
+      ecs: 'ECS',
+      icc: 'ICC',
       reportingC2: 'KAMD_OPS',
+      commandC2: ['KAMD_OPS', 'MCRC'],
+      c2Axis: 'KAMD',
       engageableThreats: ['SRBM'],
-      requiredSensors: ['GREEN_PINE', 'MSAM_MFR'],
-      c2Axis: 'KAMD'
+      requiredSensors: ['GREEN_PINE', 'MSAM_MFR']
+    }
+  },
+  LSAM_AAM: {
+    name: 'L-SAM (대공)',
+    capability: {
+      maxRange: 200,          // km
+      minRange: 10,           // km
+      maxAlt: 25,             // km
+      minAlt: 0.05,           // km (50m)
+      pkTable: { AIRCRAFT: 0.90, CRUISE_MISSILE: 0.80, UAS: 0.60 },
+      ammoCount: 8,
+      interceptMethod: 'guided',
+      interceptorSpeed: 1200, // m/s
+      boostTime: 2.0,         // s
+      navConstant: 4.0,       // PNG 항법상수 N
+      killRadius: 0.3,        // km (근접신관)
+      warheadEffectiveness: 0.85
+    },
+    relations: {
+      priority: 'AAM_SECOND',
+      ecs: 'ECS',
+      icc: 'ICC',
+      reportingC2: 'KAMD_OPS',
+      commandC2: ['KAMD_OPS', 'MCRC'],
+      c2Axis: 'KAMD',
+      engageableThreats: ['AIRCRAFT', 'CRUISE_MISSILE', 'UAS'],
+      requiredSensors: ['MSAM_MFR']
     }
   }
 });
@@ -95,10 +128,32 @@ export const SENSOR_TYPES = deepFreeze({
 export const C2_TYPES = deepFreeze({
   KAMD_OPS: {
     name: 'KAMD 작전통제소',
-    processingDelay: { min: 20, max: 120 }, // seconds
+    processingDelay: { min: 20, max: 120 }, // seconds (구 스펙 호환; Phase 1.3에서 20~60으로 조정)
     simultaneousCapacity: 2,
     role: 'ballistic_defense',
-    axis: 'KAMD'
+    axis: 'KAMD',
+    level: 'command',
+    subordinates: ['ICC']
+  },
+  ICC: {
+    name: 'ICC (정보조정소, 대대급)',
+    processingDelay: { min: 5, max: 15 },   // seconds
+    simultaneousCapacity: 4,
+    role: 'battalion_coordination',
+    axis: 'KAMD',
+    level: 'battalion',
+    superior: 'KAMD_OPS',
+    subordinates: ['ECS']
+  },
+  ECS: {
+    name: 'ECS (교전통제소, 포대급)',
+    processingDelay: { min: 2, max: 5 },    // seconds
+    simultaneousCapacity: 2,
+    role: 'battery_fire_control',
+    axis: 'KAMD',
+    level: 'battery',
+    superior: 'ICC',
+    subordinates: []
   }
 });
 
@@ -142,5 +197,30 @@ export const THREAT_TYPES = deepFreeze({
   }
 });
 
-/** @type {Object<string, Object>} 토폴로지 관계 (Phase 4에서 확장) */
-export const TOPOLOGY_RELATIONS = deepFreeze({});
+/**
+ * 토폴로지 관계 — 선형 C2 킬체인 + Kill Web 구조 정의
+ * @type {Object<string, Object>}
+ */
+export const TOPOLOGY_RELATIONS = deepFreeze({
+  linear: {
+    name: '선형 3축 C2',
+    description: 'GREEN_PINE → KAMD_OPS → ICC → ECS → L-SAM',
+    killchain: [
+      { from: 'GREEN_PINE', to: 'KAMD_OPS', linkType: 'long_range', delay: 16 },
+      { from: 'KAMD_OPS', to: 'ICC',       linkType: 'long_range', delay: 16 },
+      { from: 'ICC',       to: 'ECS',       linkType: 'short_range', delay: 1 },
+      { from: 'ECS',       to: 'LSAM_ABM',  linkType: 'short_range', delay: 1 }
+    ],
+    s2sEstimate: { min: 61, max: 114 }
+  },
+  killweb: {
+    name: 'Kill Web (IBCS)',
+    description: '모든 센서 → IAOC → EOC → 사수',
+    killchain: [
+      { from: '*_SENSOR', to: 'IAOC', linkType: 'ifcn', delay: 1 },
+      { from: 'IAOC',     to: 'EOC',  linkType: 'ifcn', delay: 1 },
+      { from: 'EOC',      to: '*_SHOOTER', linkType: 'ifcn', delay: 1 }
+    ],
+    s2sEstimate: { min: 5, max: 9 }
+  }
+});

@@ -133,13 +133,35 @@ export class SensorEntity extends BaseEntity {
 export class C2Entity extends BaseEntity {
   /**
    * @param {string} id
-   * @param {string} typeId - C2_TYPES 키
+   * @param {string} typeId - C2_TYPES 키 (KAMD_OPS, ICC, ECS)
    * @param {{lon:number, lat:number, alt:number}} position
+   * @param {import('./registry.js').Registry} [registry]
    */
-  constructor(id, typeId, position) {
+  constructor(id, typeId, position, registry) {
     super(id, typeId, position);
+    this._registry = registry || null;
+    /** @type {Array<{threatId:string, receivedTime:number, status:string}>} */
     this.pendingTracks = [];
+    /** @type {Array<{threatId:string, assignedShooter:string, status:string}>} */
     this.engagementPlan = [];
+    /** @type {number} 현재 처리 중인 위협 수 */
+    this.activeProcessingCount = 0;
+  }
+
+  /**
+   * 새로운 위협 트랙을 수신한다.
+   * @param {string} threatId
+   * @param {number} simTime
+   */
+  receiveTrack(threatId, simTime) {
+    const existing = this.pendingTracks.find(t => t.threatId === threatId);
+    if (!existing) {
+      this.pendingTracks.push({
+        threatId,
+        receivedTime: simTime,
+        status: 'pending' // pending|processing|authorized|forwarded
+      });
+    }
   }
 }
 

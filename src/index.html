@@ -31,6 +31,14 @@
   .pip.r{background:#ffcc00;}
   .lst{font-size:7px;margin-left:auto;}
 
+  /* 킬체인 진행 표시 */
+  .kc-step{display:flex;justify-content:space-between;font-size:9px;margin-bottom:3px;padding:2px 4px;}
+  .kc-step .kc-st{font-weight:bold;color:rgba(0,255,136,0.3);}
+  .kc-step.active{background:rgba(0,255,136,0.06);}
+  .kc-step.active .kc-st{color:#00ff88;}
+  .kc-step.done .kc-st{color:#44aaff;}
+  .kc-step.firing .kc-st{color:#ff8800;}
+
   /* 교전 로그 */
   #log{font-size:8px;color:rgba(0,255,136,0.45);max-height:85px;overflow-y:auto;line-height:1.55;}
   #log::-webkit-scrollbar{width:2px;}
@@ -97,6 +105,16 @@
     <div class="row"><span class="lbl">아키텍처</span><span class="gn" id="archMode">LINEAR C2</span></div>
     <div class="row"><span class="lbl">시뮬레이션</span><span class="yl" id="simState">READY</span></div>
     <div class="row"><span class="lbl">시뮬시간</span><span class="bl" id="simTime">0.0s</span></div>
+  </div>
+  <div class="hbox">
+    <h3>&#9656; KILL CHAIN</h3>
+    <div id="killchainHud">
+      <div class="kc-step" id="kc-gp"><span class="lbl">GREEN_PINE</span><span class="kc-st">—</span></div>
+      <div class="kc-step" id="kc-kamd"><span class="lbl">KAMD_OPS</span><span class="kc-st">—</span></div>
+      <div class="kc-step" id="kc-icc"><span class="lbl">ICC</span><span class="kc-st">—</span></div>
+      <div class="kc-step" id="kc-ecs"><span class="lbl">ECS</span><span class="kc-st">—</span></div>
+      <div class="kc-step" id="kc-fire"><span class="lbl">L-SAM</span><span class="kc-st">—</span></div>
+    </div>
   </div>
   <div class="hbox">
     <h3>&#9656; LAUNCHER STATUS</h3>

@@ -124,4 +124,17 @@ export class Registry {
   getC2Type(c2TypeId) {
     return this._c2s[c2TypeId] || null;
   }
+
+  /**
+   * 아키텍처별 토폴로지를 구축한다.
+   * TOPOLOGY_RELATIONS에 정의된 킬체인 경로를 기반으로
+   * 엔티티 간 연결 관계를 반환한다.
+   * @param {'linear'|'killweb'} architecture
+   * @param {Object} [topologyData] - TOPOLOGY_RELATIONS (외부 주입 가능)
+   * @returns {{nodes: string[], edges: Array<{from:string, to:string, delay:number}>}|null}
+   */
+  buildTopology(architecture, topologyData) {
+    // Phase 1.3에서 구현
+    throw new Error('Not implemented: buildTopology');
+  }
 }

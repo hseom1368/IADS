@@ -259,3 +259,43 @@ export function isInSector(sensorPos, targetPos, azCenter, azHalf, elMax, maxRan
 
   return true;
 }
+
+// ═══════════════════════════════════════════════════════════
+//  Phase 1.1 신규 물리 함수 (스텁 — 구현 예정)
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 위협 궤적을 예측하여 사수 교전 구역 내 요격 지점을 계산한다.
+ * @param {{position:{lon:number,lat:number,alt:number}, velocity:{x:number,y:number,z:number}}} threat - 위협 현재 상태
+ * @param {{position:{lon:number,lat:number,alt:number}, capability:{maxRange:number, minRange:number, maxAlt:number, minAlt:number}}} shooter - 사수 위치+능력
+ * @returns {{lon:number, lat:number, alt:number}|null} 예측 요격지점 또는 null (교전 불가)
+ */
+export function predictInterceptPoint(threat, shooter) {
+  // Phase 1.1에서 구현
+  throw new Error('Not implemented: predictInterceptPoint');
+}
+
+/**
+ * 요격미사일 비행시간을 역산하여 선제 발사 시점을 결정한다.
+ * @param {{position:{lon:number,lat:number,alt:number}, velocity:{x:number,y:number,z:number}}} threat
+ * @param {{position:{lon:number,lat:number,alt:number}, capability:{interceptorSpeed:number}}} shooter
+ * @param {{lon:number, lat:number, alt:number}} interceptPoint - 예측 요격지점
+ * @returns {number} 발사 시점 (simTime 기준, 초)
+ */
+export function calculateLaunchTime(threat, shooter, interceptPoint) {
+  // Phase 1.1에서 구현
+  throw new Error('Not implemented: calculateLaunchTime');
+}
+
+/**
+ * 예측 요격지점에서의 Pk를 계산한다 (교전 의사결정용).
+ * 거리, 고도, 위협 기동여부를 반영한 조정 Pk.
+ * @param {{capability:{pkTable:Object, maxRange:number, minRange:number, maxAlt:number, minAlt:number}}} shooter
+ * @param {{lon:number, lat:number, alt:number}} interceptPoint
+ * @param {{typeId:string, velocity:{x:number,y:number,z:number}}} threat
+ * @returns {number} 0~1 사이의 예측 Pk
+ */
+export function predictedPk(shooter, interceptPoint, threat) {
+  // Phase 1.1에서 구현
+  throw new Error('Not implemented: predictedPk');
+}
