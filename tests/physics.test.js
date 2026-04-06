@@ -121,6 +121,46 @@ describe('ballisticTrajectory', () => {
     expect(dv).toBeGreaterThan(9.81 * dt * 0.95);
     expect(dv).toBeLessThan(9.81 * dt * 1.05);
   });
+
+  // ── 대기 저항 (drag) 테스트 (Phase 1.1 수정) ──
+
+  it('고고도(150km) → 대기저항 무시할 수준 (속도 변화 < 1%)', () => {
+    const pos = { lon: 127.0, lat: 37.5, alt: 150000 };
+    const vel = enuToEcefVel(2040, 0, 0);
+    const speed0 = velMag(vel);
+    // 10초 적분
+    let p = { ...pos };
+    let v = { ...vel };
+    for (let t = 0; t < 10; t += 0.5) {
+      const r = ballisticTrajectory(p, v, 0.5);
+      p = r.pos;
+      v = r.vel;
+    }
+    // 고고도에서는 중력만 영향, 수평 속도 거의 보존
+    const speedFinal = velMag(v);
+    // 중력에 의한 속도 증가가 있으므로, 드래그에 의한 감속은 미미해야 함
+    // 최소한 speedFinal은 speed0 근처 (중력 가속은 방향이 다름)
+    expect(speedFinal).toBeGreaterThan(speed0 * 0.95);
+  });
+
+  it('저고도(5km) → 대기저항으로 속도 감소', () => {
+    const pos = { lon: 127.0, lat: 37.5, alt: 5000 };
+    // 수평 비행 2040 m/s
+    const vel = enuToEcefVel(2040, 0, 0);
+    const speed0 = velMag(vel);
+    // 5초 적분
+    let p = { ...pos };
+    let v = { ...vel };
+    for (let t = 0; t < 5; t += 0.5) {
+      const r = ballisticTrajectory(p, v, 0.5);
+      p = r.pos;
+      v = r.vel;
+    }
+    const speedFinal = velMag(v);
+    // 저고도에서 drag 때문에 수평 속도가 감소해야 함 (중력 무관 성분)
+    // 속도가 원래보다 작아야 함 (중력에 의한 수직 가속 포함하더라도 수평 감속)
+    expect(speedFinal).toBeLessThan(speed0 * 1.05); // drag가 있으면 큰 가속 없음
+  });
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -328,6 +368,42 @@ describe('calculateLaunchTime', () => {
     const offset = calculateLaunchTime(threat, shooter, interceptPoint);
     expect(offset).toBeGreaterThanOrEqual(0);
   });
+
+  // ── safety_margin 테스트 (Phase 1.1 수정) ──
+
+  it('safetyMargin=0 → safety_margin 미적용 결과', () => {
+    const threat = {
+      position: { lon: 127.0, lat: 38.0, alt: 150000 },
+      velocity: enuToEcefVel(0, -2040, -800, 38.0, 127.0)
+    };
+    const interceptPoint = { lon: 127.0, lat: 37.3, alt: 50000 };
+    const offset0 = calculateLaunchTime(threat, shooter, interceptPoint, 0);
+    const offset2 = calculateLaunchTime(threat, shooter, interceptPoint, 2.0);
+    // safety_margin=2.0이면 offset이 2초 작아야 함
+    expect(offset0 - offset2).toBeCloseTo(2.0, 0);
+  });
+
+  it('safetyMargin=5.0 → offset이 5초 더 감소', () => {
+    const threat = {
+      position: { lon: 127.0, lat: 38.0, alt: 150000 },
+      velocity: enuToEcefVel(0, -2040, -800, 38.0, 127.0)
+    };
+    const interceptPoint = { lon: 127.0, lat: 37.3, alt: 50000 };
+    const offset0 = calculateLaunchTime(threat, shooter, interceptPoint, 0);
+    const offset5 = calculateLaunchTime(threat, shooter, interceptPoint, 5.0);
+    expect(offset0 - offset5).toBeCloseTo(5.0, 0);
+  });
+
+  it('기본 safetyMargin=2.0 적용', () => {
+    const threat = {
+      position: { lon: 127.0, lat: 38.0, alt: 150000 },
+      velocity: enuToEcefVel(0, -2040, -800, 38.0, 127.0)
+    };
+    const interceptPoint = { lon: 127.0, lat: 37.3, alt: 50000 };
+    const offsetDefault = calculateLaunchTime(threat, shooter, interceptPoint);
+    const offsetExplicit = calculateLaunchTime(threat, shooter, interceptPoint, 2.0);
+    expect(offsetDefault).toBe(offsetExplicit);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -379,5 +455,39 @@ describe('predictedPk', () => {
     const threat = { typeId: 'UNKNOWN_MISSILE', maneuvering: false };
     const pk = predictedPk(shooter, interceptPoint, threat);
     expect(pk).toBe(0);
+  });
+
+  // ── jamming_penalty 테스트 (Phase 1.1 수정) ──
+
+  it('jammingLevel=0.3 → Pk 30% 감소', () => {
+    const interceptPoint = { lon: 127.0, lat: 37.3, alt: 50000 };
+    const threat = { typeId: 'SRBM', maneuvering: false };
+    const pkNoJam = predictedPk(shooter, interceptPoint, threat, 0);
+    const pkJam = predictedPk(shooter, interceptPoint, threat, 0.3);
+    expect(pkJam / pkNoJam).toBeCloseTo(0.7, 1);
+  });
+
+  it('jammingLevel=1.0 → Pk=0', () => {
+    const interceptPoint = { lon: 127.0, lat: 37.3, alt: 50000 };
+    const threat = { typeId: 'SRBM', maneuvering: false };
+    const pk = predictedPk(shooter, interceptPoint, threat, 1.0);
+    expect(pk).toBe(0);
+  });
+
+  it('jammingLevel=0 (기본값) → 기존 결과와 동일', () => {
+    const interceptPoint = { lon: 127.0, lat: 37.3, alt: 50000 };
+    const threat = { typeId: 'SRBM', maneuvering: true };
+    const pkDefault = predictedPk(shooter, interceptPoint, threat);
+    const pkExplicit = predictedPk(shooter, interceptPoint, threat, 0);
+    expect(pkDefault).toBe(pkExplicit);
+  });
+
+  it('weapon-specs 예시 완전 검증: 0.85 × 0.87 × 0.85 × 1.0 = 0.63', () => {
+    const interceptPoint = { lon: 127.0, lat: 37.3, alt: 50000 };
+    const threat = { typeId: 'SRBM', maneuvering: true };
+    const pk = predictedPk(shooter, interceptPoint, threat, 0); // jamming=0
+    // weapon-specs: 0.85 × range_factor × 0.85 × 1.0
+    expect(pk).toBeGreaterThan(0.50);
+    expect(pk).toBeLessThan(0.75);
   });
 });

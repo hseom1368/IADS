@@ -124,8 +124,15 @@ export function slantRange(pos1, pos2) {
   return vec3Mag(d) / 1000;
 }
 
+// ── 대기 저항 상수 ──
+const RHO_SEA_LEVEL = 1.225; // 해수면 대기 밀도 (kg/m³)
+const SCALE_HEIGHT = 8500;    // 대기 스케일 높이 (m)
+const DRAG_CD = 0.3;          // 탄도미사일 항력계수
+const DRAG_AREA = 0.5;        // 유효 단면적 (m²)
+const DRAG_MASS = 1000;       // 탄두 질량 (kg)
+
 /**
- * 탄도 궤적을 1스텝 적분한다 (중력 포물선).
+ * 탄도 궤적을 1스텝 적분한다 (중력 + 대기저항).
  * @param {{lon:number, lat:number, alt:number}} pos - 현재 위치
  * @param {{x:number, y:number, z:number}} vel - ECEF 속도 (m/s)
  * @param {number} dt - 시간 스텝 (초)
@@ -138,8 +145,19 @@ export function ballisticTrajectory(pos, vel, dt) {
   const gravDir = vec3Norm({ x: -ecefPos.x, y: -ecefPos.y, z: -ecefPos.z });
   const gravAccel = vec3Scale(gravDir, GRAVITY * dt);
 
-  // 속도 적분: v(t+dt) = v(t) + g*dt
-  const newVel = vec3Add(vel, gravAccel);
+  // 대기 저항: rho = rho0 * exp(-alt/H), F_drag = 0.5 * rho * Cd * A * v²
+  const alt = Math.max(0, pos.alt);
+  const rho = RHO_SEA_LEVEL * Math.exp(-alt / SCALE_HEIGHT);
+  const speed = vec3Mag(vel);
+  let dragAccel = { x: 0, y: 0, z: 0 };
+  if (speed > 0 && rho > 1e-10) {
+    const dragForcePerMass = 0.5 * rho * DRAG_CD * DRAG_AREA * speed / DRAG_MASS;
+    const velDir = vec3Norm(vel);
+    dragAccel = vec3Scale(velDir, -dragForcePerMass * dt);
+  }
+
+  // 속도 적분: v(t+dt) = v(t) + g*dt + drag*dt
+  const newVel = vec3Add(vec3Add(vel, gravAccel), dragAccel);
 
   // 위치 적분: x(t+dt) = x(t) + v(t+dt)*dt
   const newEcef = vec3Add(ecefPos, vec3Scale(newVel, dt));
@@ -305,12 +323,14 @@ export function predictInterceptPoint(threat, shooter) {
 
 /**
  * 요격미사일 비행시간을 역산하여 선제 발사 시점 오프셋을 결정한다.
+ * weapon-specs 7.1: 발사 시점 = t_threat - t_interceptor - safety_margin
  * @param {{position:{lon:number,lat:number,alt:number}, velocity:{x:number,y:number,z:number}}} threat
  * @param {{position:{lon:number,lat:number,alt:number}, capability:{interceptorSpeed:number, boostTime?:number}}} shooter
  * @param {{lon:number, lat:number, alt:number}} interceptPoint - 예측 요격지점
+ * @param {number} [safetyMargin=2.0] - 안전 여유시간 (초)
  * @returns {number} 발사까지 대기 시간 (초, 0 = 즉시 발사)
  */
-export function calculateLaunchTime(threat, shooter, interceptPoint) {
+export function calculateLaunchTime(threat, shooter, interceptPoint, safetyMargin = 2.0) {
   const cap = shooter.capability;
 
   // 1. 요격미사일 비행시간 추정
@@ -335,19 +355,20 @@ export function calculateLaunchTime(threat, shooter, interceptPoint) {
     if (dist < ARRIVAL_THRESHOLD) break;
   }
 
-  // 3. 발사 오프셋 = 위협 도달시간 - 요격미사일 비행시간
-  return Math.max(0, tThreat - tInterceptor);
+  // 3. 발사 오프셋 = 위협 도달시간 - 요격미사일 비행시간 - safety_margin
+  return Math.max(0, tThreat - tInterceptor - safetyMargin);
 }
 
 /**
  * 예측 요격지점에서의 Pk를 계산한다 (교전 의사결정용).
- * weapon-specs 섹션 6.1: predicted_Pk = base_pk × range_factor × maneuver_penalty
+ * weapon-specs 섹션 6.1: predicted_Pk = base_pk × range_factor × maneuver_penalty × jamming_penalty
  * @param {{position:{lon:number,lat:number,alt:number}, capability:{pkTable:Object, maxRange:number}}} shooter
  * @param {{lon:number, lat:number, alt:number}} interceptPoint
  * @param {{typeId:string, maneuvering?:boolean}} threat
+ * @param {number} [jammingLevel=0] - 재밍 수준 (0~1), jamming_penalty = 1 - jammingLevel
  * @returns {number} 0~1 사이의 예측 Pk
  */
-export function predictedPk(shooter, interceptPoint, threat) {
+export function predictedPk(shooter, interceptPoint, threat, jammingLevel = 0) {
   const cap = shooter.capability;
   const basePk = (cap.pkTable && cap.pkTable[threat.typeId]) || 0;
   if (basePk === 0) return 0;
@@ -355,6 +376,7 @@ export function predictedPk(shooter, interceptPoint, threat) {
   const dIntercept = slantRange(shooter.position, interceptPoint);
   const rangeFactor = Math.max(0, 1 - (dIntercept / cap.maxRange) ** 2);
   const maneuverPenalty = threat.maneuvering ? 0.85 : 1.0;
+  const jammingPenalty = 1 - jammingLevel;
 
-  return basePk * rangeFactor * maneuverPenalty;
+  return basePk * rangeFactor * maneuverPenalty * jammingPenalty;
 }
