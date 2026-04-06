@@ -27,19 +27,19 @@
 - [x] `core/physics.js`: predictedPk — 예측 요격 지점 기준 의사결정용 Pk 계산 + 테스트
 
 ### 1.2 타입 레지스트리 + 엔티티 시스템
-- [ ] `config/weapon-data.js`: 탄도탄 대응 최소 구성 타입 정의
+- [x] `config/weapon-data.js`: 탄도탄 대응 최소 구성 타입 정의
   - 센서: GREEN_PINE(조기경보, 800km), MSAM_MFR(다기능레이더, 탄도탄100km/항공기150km)
   - C2: KAMD_OPS(사령부), ICC(대대), ECS(포대)
-  - 사수: L-SAM(ABM탄 + AAM탄 통합 체계)
+  - 사수: L-SAM(ABM탄 + AAM탄 통합 체계, pairedSystem/systemGroup 관계)
   - 위협: SRBM(Mach6, 3단계 비행프로파일)
   - 토폴로지: GREEN_PINE→KAMD_OPS→ICC→ECS→L-SAM (선형 KAMD축)
-- [ ] `core/registry.js`: Registry 클래스 — weapon-data 로딩, getPrioritizedShooters(), buildTopology()
-- [ ] `core/entities.js`: BaseEntity (id, typeId, position, operational)
-- [ ] `core/entities.js`: SensorEntity (GREEN_PINE + MSAM_MFR)
-- [ ] `core/entities.js`: C2Entity (KAMD_OPS, ICC, ECS — 처리지연, pendingTracks)
-- [ ] `core/entities.js`: ShooterEntity (L-SAM — ABM탄/AAM탄, currentAmmo, status)
-- [ ] `core/entities.js`: ThreatEntity (SRBM: Mach6, 3단계 비행프로파일)
-- [ ] `core/entities.js`: InterceptorEntity (PNG 유도, 부스터+유도 단계)
+- [x] `core/registry.js`: Registry 클래스 — weapon-data 로딩, getPrioritizedShooters(), buildTopology(), getPairedShooter(), getSystemGroup()
+- [x] `core/entities.js`: BaseEntity (id, typeId, position, operational)
+- [x] `core/entities.js`: SensorEntity (GREEN_PINE + MSAM_MFR)
+- [x] `core/entities.js`: C2Entity (KAMD_OPS, ICC, ECS — 처리지연, pendingTracks)
+- [x] `core/entities.js`: ShooterEntity (L-SAM — ABM탄/AAM탄, currentAmmo, status, pairedShooterId, engagementHistory)
+- [x] `core/entities.js`: ThreatEntity (SRBM: Mach6, 3단계 비행프로파일)
+- [x] `core/entities.js`: InterceptorEntity (PNG 유도, 부스터+유도 단계, killRadius, warheadEffectiveness, interceptMethod)
 
 ### 1.3 시뮬레이션 엔진 + 선형 킬체인
 - [ ] `core/sim-engine.js`: SimEngine 클래스 — requestAnimationFrame 루프

@@ -50,7 +50,9 @@ export const SHOOTER_TYPES = deepFreeze({
       commandC2: ['KAMD_OPS', 'MCRC'],
       c2Axis: ['KAMD', 'MCRC'],
       engageableThreats: ['SRBM'],
-      requiredSensors: ['GREEN_PINE', 'MSAM_MFR']
+      requiredSensors: ['GREEN_PINE', 'MSAM_MFR'],
+      pairedSystem: 'LSAM_AAM',
+      systemGroup: 'LSAM'
     }
   },
   LSAM_AAM: {
@@ -77,7 +79,9 @@ export const SHOOTER_TYPES = deepFreeze({
       commandC2: ['KAMD_OPS', 'MCRC'],
       c2Axis: ['KAMD', 'MCRC'],
       engageableThreats: ['AIRCRAFT', 'CRUISE_MISSILE', 'UAS'],
-      requiredSensors: ['MSAM_MFR']
+      requiredSensors: ['MSAM_MFR'],
+      pairedSystem: 'LSAM_ABM',
+      systemGroup: 'LSAM'
     }
   }
 });

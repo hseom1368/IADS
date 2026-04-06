@@ -40,6 +40,10 @@ export class ShooterEntity extends BaseEntity {
     this.currentAmmo = cap ? cap.ammoCount : 0;
     this.engagedTarget = null;
     this.status = 'ready'; // ready|tracking|engaged|reloading|out_of_ammo|destroyed
+    /** @type {string|null} 동일 물리적 체계의 대응 사수 인스턴스 ID */
+    this.pairedShooterId = null;
+    /** @type {Array<{threatId:string, result:string, shooterTypeId:string}>} 교전 이력 (재교전 방지) */
+    this.engagementHistory = [];
   }
 
   /**
@@ -261,7 +265,7 @@ export class ThreatEntity extends BaseEntity {
 export class InterceptorEntity extends BaseEntity {
   /**
    * @param {string} id
-   * @param {Object} config - { position, speed, boostTime, navConstant, targetThreatId, shooterId }
+   * @param {Object} config - { position, speed, boostTime, navConstant, targetThreatId, shooterId, killRadius, warheadEffectiveness, interceptMethod }
    */
   constructor(id, config) {
     super(id, 'INTERCEPTOR', config.position);
@@ -272,6 +276,12 @@ export class InterceptorEntity extends BaseEntity {
     this.targetThreatId = config.targetThreatId;
     this.shooterId = config.shooterId;
     this.state = 'boost'; // boost|guidance|hit|miss
+    /** @type {number} 탄두 유효 반경 (km) */
+    this.killRadius = config.killRadius || 0;
+    /** @type {number} 탄두 효과 확률 (0~1) */
+    this.warheadEffectiveness = config.warheadEffectiveness || 0;
+    /** @type {string} 요격 방식 (hit-to-kill|direct_hit|guided) */
+    this.interceptMethod = config.interceptMethod || 'guided';
   }
 
   /**

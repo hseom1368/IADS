@@ -134,7 +134,38 @@ export class Registry {
    * @returns {{nodes: string[], edges: Array<{from:string, to:string, delay:number}>}|null}
    */
   buildTopology(architecture, topologyData) {
-    // Phase 1.3에서 구현
-    throw new Error('Not implemented: buildTopology');
+    const topo = topologyData?.[architecture];
+    if (!topo) return null;
+
+    const nodeSet = new Set();
+    const edges = [];
+    for (const link of topo.killchain) {
+      nodeSet.add(link.from);
+      nodeSet.add(link.to);
+      edges.push({ from: link.from, to: link.to, delay: link.delay });
+    }
+    return { nodes: [...nodeSet], edges };
+  }
+
+  /**
+   * 동일 물리적 체계의 대응 탄종 사수 타입을 반환한다.
+   * @param {string} shooterTypeId
+   * @returns {string|null}
+   */
+  getPairedShooter(shooterTypeId) {
+    const shooter = this._shooters[shooterTypeId];
+    if (!shooter) return null;
+    return shooter.relations.pairedSystem || null;
+  }
+
+  /**
+   * 사수 타입의 물리적 체계 그룹을 반환한다.
+   * @param {string} shooterTypeId
+   * @returns {string|null}
+   */
+  getSystemGroup(shooterTypeId) {
+    const shooter = this._shooters[shooterTypeId];
+    if (!shooter) return null;
+    return shooter.relations.systemGroup || null;
   }
 }
