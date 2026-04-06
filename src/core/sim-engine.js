@@ -458,11 +458,14 @@ export class SimEngine {
           this._fireInterceptor(threat, shooter, interceptPoint, pk, kcState);
           break;
         } else if (pk >= PK_EMERGENCY_THRESHOLD) {
-          // 긴급 교전: 잔여 교전 기회 ≤ 2
-          this._fireInterceptor(threat, shooter, interceptPoint, pk, kcState);
-          break;
+          // 긴급 교전: 잔여 교전 기회 ≤ 2일 때만 허용 (weapon-specs 7.2 STEP 4b)
+          const remainingShooters = this._countRemainingShooters(threat);
+          if (remainingShooters <= 2) {
+            this._fireInterceptor(threat, shooter, interceptPoint, pk, kcState);
+            break;
+          }
         }
-        // Pk < 0.10 → 다음 사수 시도
+        // Pk < 0.10 또는 잔여 기회 > 2 → 다음 사수 시도
       }
     }
   }
@@ -494,6 +497,11 @@ export class SimEngine {
     this._killchain.completeKillchain(threat.id);
 
     this._eventLog.log({
+      threatId: threat.id, eventType: 'SHOOTER_ASSIGNED', simTime: this.simTime,
+      data: { shooterId: shooter.id, shooterTypeId: shooter.typeId }
+    });
+
+    this._eventLog.log({
       threatId: threat.id, eventType: 'ENGAGEMENT_FIRED', simTime: this.simTime,
       data: { shooterId: shooter.id, interceptorId, pk, interceptPoint }
     });
@@ -502,6 +510,26 @@ export class SimEngine {
       threatId: threat.id, shooterId: shooter.id,
       interceptorId, pk, simTime: this.simTime
     });
+  }
+
+  /**
+   * 해당 위협에 대해 교전 가능한 잔여 사수 수를 계산한다.
+   * @param {ThreatEntity} threat
+   * @returns {number}
+   * @private
+   */
+  _countRemainingShooters(threat) {
+    let count = 0;
+    const candidates = this._registry.getPrioritizedShooters(threat.typeId);
+    for (const candidate of candidates) {
+      for (const shooter of this._shooters.values()) {
+        if (shooter.typeId !== candidate.typeId) continue;
+        if (!shooter.canEngage(threat.typeId)) continue;
+        if (shooter.status === 'out_of_ammo') continue;
+        count++;
+      }
+    }
+    return count;
   }
 
   /**

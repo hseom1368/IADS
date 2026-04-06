@@ -29,7 +29,9 @@ export class CommChannel {
 
     if (jammingLevel <= 0) return baseDelay;
 
-    // weapon-specs 8.3: degradation = base × (0.5 + random(0~1.0))
+    // weapon-specs 8.3: link_degradation = base × (0.5 + random(0~1.0))
+    // 스펙 공식 effective_delay = base_delay × degradation은 jamming=0일 때 delay=0이 되므로
+    // 물리적 의미에 맞게 baseDelay × (1 + degradation) 해석: 재밍이 기본 지연을 증폭
     const degradation = jammingLevel * (0.5 + Math.random());
     if (degradation > 0.8) return Infinity; // 링크 두절
 
