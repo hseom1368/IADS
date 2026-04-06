@@ -275,6 +275,35 @@ export class SimEngine {
         this._initThreatVelocity(threat, speed);
       }
 
+      // 고도 프로파일 추종: 목표 고도와 현재 고도 차이로 수직 성분 조정
+      const targetAltKm = threat.getCurrentAltitude();
+      const targetAltM = targetAltKm * 1000;
+      const altError = targetAltM - threat.position.alt;
+
+      // UP 방향 계산 (지표면 법선 = 위도/경도 기반 단위벡터)
+      const latR = threat.position.lat * Math.PI / 180;
+      const lonR = threat.position.lon * Math.PI / 180;
+      const cosLat = Math.cos(latR);
+      const sinLat = Math.sin(latR);
+      const cosLon = Math.cos(lonR);
+      const sinLon = Math.sin(lonR);
+      const up = { x: cosLat * cosLon, y: cosLat * sinLon, z: sinLat };
+
+      // 현재 속도의 UP 성분 추출
+      const velDotUp = threat.velocity.x * up.x + threat.velocity.y * up.y + threat.velocity.z * up.z;
+      // 목표 수직 속도: 고도 오차에 비례 (gain 계수로 추종 속도 조절)
+      const altGain = 0.5; // 고도 추종 게인 (초당)
+      const desiredVertSpeed = altError * altGain;
+      const vertCorrection = desiredVertSpeed - velDotUp;
+
+      // 속도 벡터에 수직 보정 적용
+      threat.velocity = {
+        x: threat.velocity.x + vertCorrection * up.x,
+        y: threat.velocity.y + vertCorrection * up.y,
+        z: threat.velocity.z + vertCorrection * up.z
+      };
+
+      // 속도 크기를 목표 속력으로 리스케일 (방향은 보정된 상태 유지)
       const velMag = Math.sqrt(
         threat.velocity.x ** 2 + threat.velocity.y ** 2 + threat.velocity.z ** 2
       );
@@ -334,7 +363,12 @@ export class SimEngine {
     const eNorm = east / mag;
     const nNorm = north / mag;
 
-    const upComponent = 0.3;
+    // 탄도미사일 발사각: 고도 프로파일에 맞게 boost 초기 상향각 설정
+    // SRBM 300km+ 비행 시 150km 정점 도달을 위해 ~45° 발사
+    const threatType = this._registry.getThreatType(threat.typeId);
+    const profile = threatType.flightProfile;
+    const isBallisticType = profile && profile.type === 'ballistic';
+    const upComponent = isBallisticType ? 0.7 : 0.3; // sin(45°) ≈ 0.71
     const horizScale = Math.sqrt(1 - upComponent * upComponent);
 
     threat.velocity = {

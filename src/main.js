@@ -37,8 +37,8 @@ const SCENARIO = {
   shooter: { id: 'shooter1', typeId: 'LSAM_ABM', position: { lon: 127.0, lat: 37.74, alt: 100 } },
   threat: {
     typeId: 'SRBM',
-    origin: { lon: 127.0, lat: 39.0, alt: 200 },
-    target: { lon: 127.0, lat: 37.5, alt: 0 }
+    origin: { lon: 127.0, lat: 40.0, alt: 200 },
+    target: { lon: 127.0, lat: 37.0, alt: 0 }
   },
   // 선형 C2 킬체인 데이터링크 경로
   datalinks: [
