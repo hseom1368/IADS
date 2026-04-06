@@ -59,7 +59,7 @@ function vec3Norm(v) {
  * @param {number} alt - 해수면 고도 (meters)
  * @returns {{x:number, y:number, z:number}} ECEF (meters)
  */
-function geodeticToEcef(lon, lat, alt) {
+export function geodeticToEcef(lon, lat, alt) {
   const lonR = lon * DEG2RAD;
   const latR = lat * DEG2RAD;
   const sinLat = Math.sin(latR);

@@ -17,7 +17,8 @@
 import { ShooterEntity, SensorEntity, C2Entity, ThreatEntity, InterceptorEntity } from './entities.js';
 import {
   slantRange, ballisticTrajectory, pngGuidance, isInSector,
-  predictInterceptPoint, calculateLaunchTime, predictedPk
+  predictInterceptPoint, calculateLaunchTime, predictedPk,
+  geodeticToEcef
 } from './physics.js';
 import { LinearKillChain } from './killchain.js';
 import { CommChannel } from './comms.js';
@@ -25,7 +26,8 @@ import { EventLog } from './event-log.js';
 
 // ── 상수 ──
 const MAX_DT = 0.05;           // 최대 dt (초, 20fps 보장)
-const MISS_DISTANCE_GROWTH = 3; // km (miss 판정: 거리가 이만큼 증가하면)
+const MISS_DISTANCE_GROWTH = 10; // km (miss 판정 완화: PNG 교정 허용)
+const INTERCEPTOR_MAX_FLIGHT = 60; // 초 (요격미사일 최대 비행시간)
 const PK_ENGAGE_THRESHOLD = 0.30;     // 교전 승인 Pk 기준
 const PK_EMERGENCY_THRESHOLD = 0.10;  // 긴급 교전 Pk 기준
 
@@ -545,6 +547,10 @@ export class SimEngine {
       interceptMethod: cap.interceptMethod
     });
     interceptor._prevDist = Infinity;
+    interceptor._launchTime = this.simTime;
+    // Pk 기반 사전 결정: 발사 시점에 요격 성공/실패를 확률적으로 결정
+    interceptor._predeterminedHit = Math.random() < pk;
+    interceptor._boostComplete = false;
 
     this._interceptors.set(interceptorId, interceptor);
     shooter.fire(threat.id);
@@ -619,6 +625,24 @@ export class SimEngine {
       if (interceptor.isInBoost()) {
         this._boostInterceptor(interceptor, dt);
       } else {
+        // 부스트 종료 직후: 속도 벡터를 목표 방향으로 초기화
+        if (!interceptor._boostComplete) {
+          interceptor._boostComplete = true;
+          const iEcef = geodeticToEcef(interceptor.position.lon, interceptor.position.lat, interceptor.position.alt);
+          const tEcef = geodeticToEcef(threat.position.lon, threat.position.lat, threat.position.alt);
+          const dx = tEcef.x - iEcef.x;
+          const dy = tEcef.y - iEcef.y;
+          const dz = tEcef.z - iEcef.z;
+          const mag = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          if (mag > 0) {
+            interceptor.velocity = {
+              x: (dx / mag) * interceptor.speed,
+              y: (dy / mag) * interceptor.speed,
+              z: (dz / mag) * interceptor.speed
+            };
+          }
+        }
+
         interceptor.velocity = pngGuidance(
           interceptor.position, interceptor.velocity,
           threat.position, interceptor.speed, dt, interceptor.navConstant
@@ -662,15 +686,13 @@ export class SimEngine {
         continue;
       }
 
-      const killRadius = interceptor.killRadius || 0.5;
-      const warheadEff = interceptor.warheadEffectiveness || 0.75;
       const dist = slantRange(interceptor.position, threat.position);
+      const flightTime = this.simTime - (interceptor._launchTime || 0);
 
-      if (dist < killRadius) {
-        const proximityFactor = 1.0 - (dist / killRadius) ** 2;
-        const hitProbability = warheadEff * proximityFactor;
-
-        if (Math.random() < hitProbability) {
+      // 근접 판정: 2km 이내 접근 시 사전 결정된 결과 적용
+      const PROXIMITY_RADIUS = 2.0; // km
+      if (dist < PROXIMITY_RADIUS) {
+        if (interceptor._predeterminedHit) {
           threat.state = 'intercepted';
           interceptor.state = 'hit';
           this._eventLog.log({
@@ -693,7 +715,11 @@ export class SimEngine {
         continue;
       }
 
-      if (interceptor._prevDist !== undefined && dist > interceptor._prevDist + MISS_DISTANCE_GROWTH) {
+      // 미스 판정: 거리 급증 또는 최대 비행시간 초과
+      const isMiss = (interceptor._prevDist !== undefined && dist > interceptor._prevDist + MISS_DISTANCE_GROWTH)
+        || flightTime > INTERCEPTOR_MAX_FLIGHT;
+
+      if (isMiss) {
         interceptor.state = 'miss';
         this._eventLog.log({
           threatId: threat.id, eventType: 'INTERCEPT_MISS', simTime: this.simTime,
