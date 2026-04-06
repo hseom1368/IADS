@@ -290,50 +290,50 @@ export class SimEngine {
       }
 
       // ── 고도 프로파일 추종 ──
-      // 목표 고도 변화율에 맞춰 속도 벡터의 상향각(climb angle)을 조절한다.
-      // 수평 성분은 origin→target 방향을 유지하면서, 수직 성분만 고도 프로파일에 맞게 설정.
-      const targetAltKm = threat.getCurrentAltitude();
-      const targetAltM = targetAltKm * 1000;
-      const altError = targetAltM - threat.position.alt;
+      // flightProfile의 목표 고도에 맞춰 속도 벡터의 수직 성분을 조절한다.
+      // flightProgress >= 1.0이면 추종 중단, 순수 물리(중력)로 자연 하강.
+      if (threat.flightProgress < 1.0) {
+        const targetAltKm = threat.getCurrentAltitude();
+        const targetAltM = targetAltKm * 1000;
+        const altError = targetAltM - threat.position.alt;
 
-      // 남은 비행시간으로 필요한 수직속도 계산
-      const remainingTime = Math.max(1, (threat._estimatedFlightTime || 300) * (1 - threat.flightProgress));
-      // 목표 수직속도: 고도 오차를 남은시간의 일부(1/3)에 해소
-      const desiredVertSpeed = altError / Math.max(1, remainingTime * 0.33);
-      // 수직속도 제한: 전체 속력의 80% 이내
-      const maxVertSpeed = speed * 0.8;
-      const clampedVertSpeed = Math.max(-maxVertSpeed, Math.min(maxVertSpeed, desiredVertSpeed));
+        // 남은 비행시간으로 필요한 수직속도 계산
+        const remainingTime = Math.max(1, (threat._estimatedFlightTime || 300) * (1 - threat.flightProgress));
+        const desiredVertSpeed = altError / Math.max(1, remainingTime * 0.33);
+        const maxVertSpeed = speed * 0.8;
+        const clampedVertSpeed = Math.max(-maxVertSpeed, Math.min(maxVertSpeed, desiredVertSpeed));
 
-      // UP 방향 (지표면 법선)
-      const latR = threat.position.lat * Math.PI / 180;
-      const lonR = threat.position.lon * Math.PI / 180;
-      const cosLat = Math.cos(latR);
-      const sinLat = Math.sin(latR);
-      const cosLon = Math.cos(lonR);
-      const sinLon = Math.sin(lonR);
-      const up = { x: cosLat * cosLon, y: cosLat * sinLon, z: sinLat };
+        // UP 방향 (지표면 법선)
+        const latR = threat.position.lat * Math.PI / 180;
+        const lonR = threat.position.lon * Math.PI / 180;
+        const cosLat = Math.cos(latR);
+        const sinLat = Math.sin(latR);
+        const cosLon = Math.cos(lonR);
+        const sinLon = Math.sin(lonR);
+        const up = { x: cosLat * cosLon, y: cosLat * sinLon, z: sinLat };
 
-      // 현재 속도에서 수직 성분 제거 → 수평 성분만 추출
-      const velDotUp = threat.velocity.x * up.x + threat.velocity.y * up.y + threat.velocity.z * up.z;
-      const horizVel = {
-        x: threat.velocity.x - velDotUp * up.x,
-        y: threat.velocity.y - velDotUp * up.y,
-        z: threat.velocity.z - velDotUp * up.z
-      };
-
-      // 수평 속력 = sqrt(전체속력² - 수직속력²) 으로 결정
-      const horizSpeed = Math.sqrt(Math.max(0, speed * speed - clampedVertSpeed * clampedVertSpeed));
-      const horizMag = Math.sqrt(horizVel.x ** 2 + horizVel.y ** 2 + horizVel.z ** 2);
-
-      // 수평 방향 정규화 후 재조합
-      if (horizMag > 0) {
-        const hScale = horizSpeed / horizMag;
-        threat.velocity = {
-          x: horizVel.x * hScale + clampedVertSpeed * up.x,
-          y: horizVel.y * hScale + clampedVertSpeed * up.y,
-          z: horizVel.z * hScale + clampedVertSpeed * up.z
+        // 현재 속도에서 수직 성분 제거 → 수평 성분만 추출
+        const velDotUp = threat.velocity.x * up.x + threat.velocity.y * up.y + threat.velocity.z * up.z;
+        const horizVel = {
+          x: threat.velocity.x - velDotUp * up.x,
+          y: threat.velocity.y - velDotUp * up.y,
+          z: threat.velocity.z - velDotUp * up.z
         };
+
+        const horizSpeed = Math.sqrt(Math.max(0, speed * speed - clampedVertSpeed * clampedVertSpeed));
+        const horizMag = Math.sqrt(horizVel.x ** 2 + horizVel.y ** 2 + horizVel.z ** 2);
+
+        if (horizMag > 0) {
+          const hScale = horizSpeed / horizMag;
+          threat.velocity = {
+            x: horizVel.x * hScale + clampedVertSpeed * up.x,
+            y: horizVel.y * hScale + clampedVertSpeed * up.y,
+            z: horizVel.z * hScale + clampedVertSpeed * up.z
+          };
+        }
       }
+      // flightProgress >= 1.0: 속도 방향 수정 없이 ballisticTrajectory에서
+      // 중력이 자연적으로 하강 궤적을 만듦
 
       const result = ballisticTrajectory(threat.position, threat.velocity, dt);
       threat.position = result.pos;

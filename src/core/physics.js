@@ -271,9 +271,18 @@ export function isInSector(sensorPos, targetPos, azCenter, azHalf, elMax, maxRan
   // 7. 방위각 차이 정규화 (-180 ~ +180)
   const azDiff = ((az - azCenter + 540) % 360) - 180;
 
-  // 8. 판정
+  // 8. 방위각/고각 판정
   if (Math.abs(azDiff) > azHalf) return false;
   if (el < 0 || el > elMax) return false;
+
+  // 9. 레이더 수평선(radar horizon) 체크 — 지구 곡률 반영
+  // d_horizon = sqrt(2·Re·h_sensor) + sqrt(2·Re·h_target)
+  // 대기 굴절 보정 계수 k=4/3 적용 (유효 지구 반경 = Re × 4/3)
+  const Re = WGS84_A * (4 / 3); // 유효 지구 반경 (대기 굴절 보정)
+  const hSensor = Math.max(0, sensorPos.alt);
+  const hTarget = Math.max(0, targetPos.alt);
+  const dHorizon = (Math.sqrt(2 * Re * hSensor) + Math.sqrt(2 * Re * hTarget)) / 1000; // m→km
+  if (range > dHorizon) return false;
 
   return true;
 }
