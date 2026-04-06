@@ -86,40 +86,19 @@ export function updateHud(engine) {
 
 // ── 킬체인 HUD DOM 매핑 ──
 // KILLCHAIN_STAGES: [GP_TO_KAMD(0), KAMD_PROCESSING(1), KAMD_TO_ICC(2), ICC_PROCESSING(3), ICC_TO_ECS(4), ECS_PROCESSING(5)]
-// DOM 매핑: kc-gp(0~1완료), kc-kamd(1완료), kc-icc(2~3완료), kc-ecs(4~5완료), kc-fire(ready_to_engage)
+// link 전송 단계도 해당 구간에 포함:
+//   kc-gp:   stage 0 (GP→KAMD 전송 중) → active
+//   kc-kamd: stage 1~2 (KAMD 처리 + KAMD→ICC 전송) → active
+//   kc-icc:  stage 3~4 (ICC 처리 + ICC→ECS 전송) → active
+//   kc-ecs:  stage 5 (ECS 처리) → active
+//   kc-fire: ready_to_engage → firing
 const KC_DOM_MAP = [
-  { domId: 'kc-gp',   activateAt: 0, doneAt: 1 },   // GP_TO_KAMD 진행 시 active, KAMD_PROCESSING 시작 시 done
-  { domId: 'kc-kamd', activateAt: 1, doneAt: 2 },   // KAMD_PROCESSING 진행 시 active
-  { domId: 'kc-icc',  activateAt: 3, doneAt: 4 },   // ICC_PROCESSING 진행 시 active
-  { domId: 'kc-ecs',  activateAt: 5, doneAt: 6 },   // ECS_PROCESSING 진행 시 active
-  { domId: 'kc-fire', activateAt: 6, doneAt: 7 }    // ready_to_engage 시 firing
+  { domId: 'kc-gp',   activateAt: 0, doneAt: 1 },
+  { domId: 'kc-kamd', activateAt: 1, doneAt: 3 },
+  { domId: 'kc-icc',  activateAt: 3, doneAt: 5 },
+  { domId: 'kc-ecs',  activateAt: 5, doneAt: 6 },
+  { domId: 'kc-fire', activateAt: -1, doneAt: -1 }   // status 기반 (ready_to_engage/completed)
 ];
-
-/**
- * 킬체인 진행 상태 HUD를 업데이트한다. 매 프레임 호출.
- * @param {import('../core/killchain.js').LinearKillChain} killchain
- * @param {number} simTime
- */
-export function updateKillchainHud(killchain, simTime) {
-  // 첫 번째 활성 위협의 킬체인 상태를 찾는다
-  let activeState = null;
-  const readyList = killchain.getReadyToEngage();
-  if (readyList.length > 0) {
-    activeState = readyList[0];
-  } else {
-    // in_progress인 것을 찾는다
-    // getState는 threatId가 필요하므로 모든 위협을 순회해야 함
-    // _states에 직접 접근은 못하므로 외부에서 threatId를 전달받아야 함
-    // → updateKillchainHudForThreat에서 처리
-  }
-
-  // 활성 상태가 없으면 모든 DOM 초기화
-  if (!activeState) {
-    _resetKillchainDom();
-  } else {
-    _applyKillchainState(activeState, simTime);
-  }
-}
 
 /**
  * 특정 위협의 킬체인 상태로 HUD를 업데이트한다.
@@ -143,7 +122,7 @@ export function updateKillchainHudForThreat(killchain, threatId, simTime) {
  * @private
  */
 function _applyKillchainState(state, simTime) {
-  const { currentStageIndex, stageStartTime, stageDuration, status } = state;
+  const { currentStageIndex, stageStartTime, status } = state;
 
   for (const mapping of KC_DOM_MAP) {
     const el = document.getElementById(mapping.domId);
@@ -152,17 +131,24 @@ function _applyKillchainState(state, simTime) {
     const stEl = el.querySelector('.kc-st');
     el.classList.remove('active', 'done', 'firing');
 
-    if (status === 'completed') {
-      el.classList.add('done');
-      if (stEl) stEl.textContent = '✓';
-    } else if (status === 'ready_to_engage') {
-      if (mapping.domId === 'kc-fire') {
+    // kc-fire는 status 기반으로 처리
+    if (mapping.domId === 'kc-fire') {
+      if (status === 'completed') {
+        el.classList.add('done');
+        if (stEl) stEl.textContent = '✓';
+      } else if (status === 'ready_to_engage') {
         el.classList.add('firing');
         if (stEl) stEl.textContent = 'FIRE';
       } else {
-        el.classList.add('done');
-        if (stEl) stEl.textContent = '✓';
+        if (stEl) stEl.textContent = '—';
       }
+      continue;
+    }
+
+    // 나머지: stage index 기반
+    if (status === 'completed' || status === 'ready_to_engage') {
+      el.classList.add('done');
+      if (stEl) stEl.textContent = '✓';
     } else if (status === 'in_progress') {
       if (currentStageIndex >= mapping.doneAt) {
         el.classList.add('done');
@@ -175,6 +161,7 @@ function _applyKillchainState(state, simTime) {
         if (stEl) stEl.textContent = '—';
       }
     } else {
+      // cancelled 등
       if (stEl) stEl.textContent = '—';
     }
   }

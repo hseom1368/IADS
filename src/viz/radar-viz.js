@@ -34,7 +34,7 @@ export function createRadarVolume(viewer, sensorPos, config) {
   const cy = sensorPos.lat;
 
   // 탐지 범위 (파란색)
-  _addSectorLines(viewer, entities, cx, cy, detectionRange,
+  const groundEntity = _addSectorLines(viewer, entities, cx, cy, detectionRange,
     azCenter, azHalf, elMax, '#0088ff', 0.25);
 
   // 교전 범위 (초록색, 있을 경우)
@@ -65,6 +65,7 @@ export function createRadarVolume(viewer, sensorPos, config) {
 
   return {
     entities,
+    groundEntity,
     destroy() {
       for (const e of entities) {
         try { viewer.entities.remove(e); } catch (_) { /* ignore */ }
@@ -76,6 +77,17 @@ export function createRadarVolume(viewer, sensorPos, config) {
 
 /**
  * 구면 부채꼴 와이어프레임 라인을 추가한다.
+ * @param {Cesium.Viewer} viewer
+ * @param {Cesium.Entity[]} entities - 엔티티 배열 (push됨)
+ * @param {number} cx - 중심 경도
+ * @param {number} cy - 중심 위도
+ * @param {number} R - 범위(m)
+ * @param {number} azCenter - 방위각 중심(°)
+ * @param {number} azHalf - 방위각 반폭(°)
+ * @param {number} elMax - 최대 고각(°)
+ * @param {string} color - CSS 색상
+ * @param {number} opacity - 불투명도
+ * @returns {Cesium.Entity} groundEntity - 지면 외곽선 엔티티
  * @private
  */
 function _addSectorLines(viewer, entities, cx, cy, R, azCenter, azHalf, elMax, color, opacity) {
@@ -165,4 +177,6 @@ function _addSectorLines(viewer, entities, cx, cy, R, azCenter, azHalf, elMax, c
     });
     entities.push(eb);
   }
+
+  return eg;
 }

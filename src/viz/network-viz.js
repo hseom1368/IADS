@@ -81,6 +81,7 @@ export function initNetworkViz(viewer, nodes, links) {
     const toNode = nodes.find(n => n.id === link.to);
     if (!fromNode || !toNode) continue;
 
+    // 데이터링크는 인터랙션 불필요 — interaction.js에서 'net_' prefix만 처리하므로 'link_' prefix는 자동 무시
     const entity = viewer.entities.add({
       id: `link_${link.from}_${link.to}`,
       polyline: {
