@@ -39,8 +39,8 @@ export const SHOOTER_TYPES = deepFreeze({
       interceptorSpeed: 1500, // m/s
       boostTime: 2.0,         // s (수직 발사 부스트)
       navConstant: 4.5,       // PNG 항법상수 N
-      killRadius: 0.5,        // km (직격파괴)
-      warheadEffectiveness: 1.0
+      killRadius: 0.05,       // km (50m, 직격파괴 hit-to-kill)
+      warheadEffectiveness: 0.95
     },
     relations: {
       priority: 'ABM_FIRST',
@@ -48,7 +48,7 @@ export const SHOOTER_TYPES = deepFreeze({
       icc: 'ICC',
       reportingC2: 'KAMD_OPS',
       commandC2: ['KAMD_OPS', 'MCRC'],
-      c2Axis: 'KAMD',
+      c2Axis: ['KAMD', 'MCRC'],
       engageableThreats: ['SRBM'],
       requiredSensors: ['GREEN_PINE', 'MSAM_MFR']
     }
@@ -66,8 +66,8 @@ export const SHOOTER_TYPES = deepFreeze({
       interceptorSpeed: 1200, // m/s
       boostTime: 2.0,         // s
       navConstant: 4.0,       // PNG 항법상수 N
-      killRadius: 0.3,        // km (근접신관)
-      warheadEffectiveness: 0.85
+      killRadius: 0.5,        // km (500m, guided 근접신관)
+      warheadEffectiveness: 0.75
     },
     relations: {
       priority: 'AAM_SECOND',
@@ -75,7 +75,7 @@ export const SHOOTER_TYPES = deepFreeze({
       icc: 'ICC',
       reportingC2: 'KAMD_OPS',
       commandC2: ['KAMD_OPS', 'MCRC'],
-      c2Axis: 'KAMD',
+      c2Axis: ['KAMD', 'MCRC'],
       engageableThreats: ['AIRCRAFT', 'CRUISE_MISSILE', 'UAS'],
       requiredSensors: ['MSAM_MFR']
     }
@@ -99,7 +99,7 @@ export const SENSOR_TYPES = deepFreeze({
       detectableThreats: ['SRBM', 'CRUISE_MISSILE', 'AIRCRAFT', 'MLRS_GUIDED', 'UAS']
     },
     relations: {
-      reportingC2: 'BATTALION_TOC',
+      reportingC2: 'ECS',
       role: 'fire_control'
     }
   },
@@ -128,8 +128,8 @@ export const SENSOR_TYPES = deepFreeze({
 export const C2_TYPES = deepFreeze({
   KAMD_OPS: {
     name: 'KAMD 작전통제소',
-    processingDelay: { min: 20, max: 120 }, // seconds (구 스펙 호환; Phase 1.3에서 20~60으로 조정)
-    simultaneousCapacity: 2,
+    processingDelay: { min: 20, max: 60 },  // seconds
+    simultaneousCapacity: 3,
     role: 'ballistic_defense',
     axis: 'KAMD',
     level: 'command',
@@ -138,7 +138,7 @@ export const C2_TYPES = deepFreeze({
   ICC: {
     name: 'ICC (정보조정소, 대대급)',
     processingDelay: { min: 5, max: 15 },   // seconds
-    simultaneousCapacity: 4,
+    simultaneousCapacity: 5,
     role: 'battalion_coordination',
     axis: 'KAMD',
     level: 'battalion',
@@ -148,7 +148,7 @@ export const C2_TYPES = deepFreeze({
   ECS: {
     name: 'ECS (교전통제소, 포대급)',
     processingDelay: { min: 2, max: 5 },    // seconds
-    simultaneousCapacity: 2,
+    simultaneousCapacity: 8,
     role: 'battery_fire_control',
     axis: 'KAMD',
     level: 'battery',
