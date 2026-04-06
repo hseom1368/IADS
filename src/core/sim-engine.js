@@ -1,7 +1,23 @@
 /**
  * @module core/sim-engine
  * SimEngine 클래스 — requestAnimationFrame 기반 메인 루프
- * step(dt): 위협 이동 → 센서 탐지 → 교전 판정 → 요격미사일 유도 → 충돌 판정
+ *
+ * 현재 step(dt) 파이프라인 (Phase 1.0 MVP — 5단계, C2 미경유):
+ *   1. 위협 이동 (ballisticTrajectory)
+ *   2. 센서 탐지 (isInSector)
+ *   3. 교전 판정 (직접 사수 선정 — C2 미경유)
+ *   4. 요격미사일 유도 (pngGuidance)
+ *   5. 충돌 판정 (killRadius + warheadEffectiveness)
+ *
+ * Phase 1.3에서 7단계 C2 킬체인 파이프라인으로 리팩터링 예정:
+ *   1. 위협 이동
+ *   2. GREEN_PINE 탐지
+ *   3. 킬체인 처리: GREEN_PINE→KAMD_OPS(16s+20~60s)→ICC(16s+5~15s)→ECS(1s+2~5s)
+ *   4. ECS: MSAM_MFR 가동, predictInterceptPoint, calculateLaunchTime
+ *   5. 교전 판정 (predictedPk ≥ 0.30, C2 승인 후)
+ *   6. 요격미사일 유도
+ *   7. 충돌 판정 + 메트릭 수집
+ *
  * Cesium 의존성 없음
  */
 
@@ -9,9 +25,9 @@ import { ShooterEntity, SensorEntity, ThreatEntity, InterceptorEntity } from './
 import { slantRange, ballisticTrajectory, pngGuidance, isInSector } from './physics.js';
 
 // ── 상수 ──
-const KILL_RADIUS = 0.5;       // km (충돌 판정 거리)
 const MAX_DT = 0.05;           // 최대 dt (초, 20fps 보장)
 const MISS_DISTANCE_GROWTH = 3; // km (miss 판정: 거리가 이만큼 증가하면)
+// ※ KILL_RADIUS 하드코딩 삭제 — weapon-data의 killRadius 사용 (CLAUDE.md 원칙: 하드코딩 금지)
 
 export class SimEngine {
   /**
@@ -528,12 +544,22 @@ export class SimEngine {
         continue;
       }
 
+      // weapon-data에서 killRadius, warheadEffectiveness 조회
+      const shooter = this._shooters.get(interceptor.shooterId);
+      const cap = shooter ? this._registry.getShooterCapability(shooter.typeId) : null;
+      const killRadius = cap?.killRadius ?? 0.5;               // km (기본값 fallback)
+      const warheadEffectiveness = cap?.warheadEffectiveness ?? 0.75;
+
       const dist = slantRange(interceptor.position, threat.position);
 
-      // 충돌 판정
-      if (dist < KILL_RADIUS) {
+      // 충돌 판정 (weapon-specs 6.2: kill_radius 이내 도달 시 탄두 효과 판정)
+      if (dist < killRadius) {
+        // proximity_factor = 1.0 - (closest_distance / kill_radius)²
+        const proximityFactor = 1.0 - (dist / killRadius) ** 2;
+        const hitProbability = warheadEffectiveness * proximityFactor;
+
         // Bernoulli 시행
-        if (Math.random() < (interceptor._pk || 0.5)) {
+        if (Math.random() < hitProbability) {
           threat.state = 'intercepted';
           interceptor.state = 'hit';
           this.emit('intercept-hit', {

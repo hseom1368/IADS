@@ -1,7 +1,14 @@
 /**
  * @module main
  * KIDA ADSIM v2.0 통합 오케스트레이터
- * Phase 1 MVP: L-SAM 1세트 + SRBM 1발 요격 시나리오
+ * Phase 1.0 MVP: L-SAM 1세트 + SRBM 1발 요격 시나리오 (직접 교전)
+ *
+ * Phase 1.5에서 전체 배치로 교체 예정:
+ *   - GREEN_PINE (후방, 조기경보)
+ *   - KAMD_OPS (오산 기반)
+ *   - ICC (대대급, 전방)
+ *   - ECS + MSAM_MFR + L-SAM 포대 (전방 배치)
+ *   - SRBM 발사원점 (북방)
  */
 
 // ── core 모듈 ──
