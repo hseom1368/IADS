@@ -42,8 +42,8 @@
 - [x] `core/entities.js`: InterceptorEntity (PNG 유도, 부스터+유도 단계, killRadius, warheadEffectiveness, interceptMethod)
 
 ### 1.3 시뮬레이션 엔진 + 선형 킬체인
-- [ ] `core/sim-engine.js`: SimEngine 클래스 — requestAnimationFrame 루프
-- [ ] step(dt) 구현:
+- [x] `core/sim-engine.js`: SimEngine 클래스 — requestAnimationFrame 루프
+- [x] step(dt) 7단계 파이프라인 구현:
   1. 위협 이동 (ballisticTrajectory)
   2. GREEN_PINE 탐지 (isInSector, 800km)
   3. 선형 킬체인: GREEN_PINE→KAMD_OPS(16s링크+20~60s처리)→ICC(16s링크+5~15s처리)→ECS(1s링크+2~5s처리)
@@ -51,8 +51,11 @@
   5. 교전 판정 (predictedPk ≥ 0.30)
   6. 요격미사일 발사 + PNG 유도 비행
   7. 충돌 판정 (kill_radius + warhead_effectiveness)
-- [ ] 이벤트 버스: EventEmitter 패턴 (on/emit/off)
-- [ ] 시뮬레이션 상태 머신: READY → RUNNING → PAUSED → COMPLETE
+- [x] `core/killchain.js`: LinearKillChain — 6단계 킬체인 상태 머신 (링크3+처리3)
+- [x] `core/comms.js`: CommChannel — 링크 지연 + 재밍 열화 모델
+- [x] `core/event-log.js`: EventLog — 킬체인 이벤트 기록 + S2S 계산
+- [x] 이벤트 버스: EventEmitter 패턴 (on/emit/off)
+- [x] 시뮬레이션 상태 머신: READY → RUNNING → PAUSED → COMPLETE
 
 ### 1.4 3D 시각화 (선형 C2 탄도탄 대응)
 > 목표: GREEN_PINE이 탐지 → KAMD→ICC→ECS 지휘통제 흐름 → MFR 추적 → L-SAM 요격까지

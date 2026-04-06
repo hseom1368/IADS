@@ -2,32 +2,32 @@
  * @module core/sim-engine
  * SimEngine 클래스 — requestAnimationFrame 기반 메인 루프
  *
- * 현재 step(dt) 파이프라인 (Phase 1.0 MVP — 5단계, C2 미경유):
+ * Phase 1.3: 7단계 C2 킬체인 파이프라인
  *   1. 위협 이동 (ballisticTrajectory)
- *   2. 센서 탐지 (isInSector)
- *   3. 교전 판정 (직접 사수 선정 — C2 미경유)
- *   4. 요격미사일 유도 (pngGuidance)
- *   5. 충돌 판정 (killRadius + warheadEffectiveness)
- *
- * Phase 1.3에서 7단계 C2 킬체인 파이프라인으로 리팩터링 예정:
- *   1. 위협 이동
- *   2. GREEN_PINE 탐지
+ *   2. GREEN_PINE 탐지 (isInSector)
  *   3. 킬체인 처리: GREEN_PINE→KAMD_OPS(16s+20~60s)→ICC(16s+5~15s)→ECS(1s+2~5s)
- *   4. ECS: MSAM_MFR 가동, predictInterceptPoint, calculateLaunchTime
- *   5. 교전 판정 (predictedPk ≥ 0.30, C2 승인 후)
- *   6. 요격미사일 유도
- *   7. 충돌 판정 + 메트릭 수집
+ *   4. 교전 판정 (predictedPk ≥ 0.30, C2 승인 후)
+ *   5. 요격미사일 유도 (pngGuidance)
+ *   6. 충돌 판정 (kill_radius + warhead_effectiveness)
+ *   7. 종료 판정
  *
  * Cesium 의존성 없음
  */
 
-import { ShooterEntity, SensorEntity, ThreatEntity, InterceptorEntity } from './entities.js';
-import { slantRange, ballisticTrajectory, pngGuidance, isInSector } from './physics.js';
+import { ShooterEntity, SensorEntity, C2Entity, ThreatEntity, InterceptorEntity } from './entities.js';
+import {
+  slantRange, ballisticTrajectory, pngGuidance, isInSector,
+  predictInterceptPoint, calculateLaunchTime, predictedPk
+} from './physics.js';
+import { LinearKillChain } from './killchain.js';
+import { CommChannel } from './comms.js';
+import { EventLog } from './event-log.js';
 
 // ── 상수 ──
 const MAX_DT = 0.05;           // 최대 dt (초, 20fps 보장)
 const MISS_DISTANCE_GROWTH = 3; // km (miss 판정: 거리가 이만큼 증가하면)
-// ※ KILL_RADIUS 하드코딩 삭제 — weapon-data의 killRadius 사용 (CLAUDE.md 원칙: 하드코딩 금지)
+const PK_ENGAGE_THRESHOLD = 0.30;     // 교전 승인 Pk 기준
+const PK_EMERGENCY_THRESHOLD = 0.10;  // 긴급 교전 Pk 기준
 
 export class SimEngine {
   /**
@@ -47,13 +47,19 @@ export class SimEngine {
     this._threats = new Map();
     this._shooters = new Map();
     this._sensors = new Map();
+    this._c2s = new Map();
     this._interceptors = new Map();
 
     // 교전 기록 (중복 교전 방지)
-    this._engagedThreats = new Set(); // 이미 교전 중인 위협 ID
+    this._engagedThreats = new Set();
 
     // 이벤트 버스
     this._listeners = {};
+
+    // C2 킬체인 + 통신 + 이벤트 로그
+    this._commChannel = new CommChannel();
+    this._eventLog = new EventLog();
+    this._killchain = new LinearKillChain(registry, this._commChannel, this._eventLog);
 
     // rAF
     this._rafId = null;
@@ -121,14 +127,33 @@ export class SimEngine {
     this._threats.clear();
     this._shooters.clear();
     this._sensors.clear();
+    this._c2s.clear();
     this._interceptors.clear();
     this._engagedThreats.clear();
     this._listeners = {};
+    this._killchain.reset();
+    this._eventLog.clear();
     if (this._rafId) {
       cancelAnimationFrame(this._rafId);
       this._rafId = null;
     }
   }
+
+  // ═══════════════════════════════════════════════════════════
+  //  접근자
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * LinearKillChain 인스턴스를 반환한다.
+   * @returns {LinearKillChain}
+   */
+  getKillchain() { return this._killchain; }
+
+  /**
+   * EventLog 인스턴스를 반환한다.
+   * @returns {EventLog}
+   */
+  getEventLog() { return this._eventLog; }
 
   // ═══════════════════════════════════════════════════════════
   //  엔티티 관리
@@ -145,11 +170,14 @@ export class SimEngine {
    */
   addThreat(id, typeId, origin, target, launchTime) {
     const threat = new ThreatEntity(id, typeId, { origin, target, launchTime }, this._registry);
-    // 비행 시간 추정 (origin→target 거리 / 기본 속도)
     const dist = slantRange(origin, target);
     const threatType = this._registry.getThreatType(typeId);
     threat._estimatedFlightTime = (dist * 1000) / threatType.speed;
     this._threats.set(id, threat);
+    this._eventLog.log({
+      threatId: id, eventType: 'THREAT_SPAWNED', simTime: this.simTime,
+      data: { threatTypeId: typeId, position: { ...origin } }
+    });
     this.emit('threat-spawned', { threatId: id, threatTypeId: typeId, position: { ...origin } });
     return threat;
   }
@@ -172,7 +200,7 @@ export class SimEngine {
    * @param {string} id
    * @param {string} typeId
    * @param {{lon:number,lat:number,alt:number}} position
-   * @param {number} [azCenter=0] - 레이더 중심 방위각 (degrees)
+   * @param {number} [azCenter=0]
    * @returns {SensorEntity}
    */
   addSensor(id, typeId, position, azCenter = 0) {
@@ -182,43 +210,32 @@ export class SimEngine {
     return sensor;
   }
 
+  /**
+   * C2 엔티티를 추가한다.
+   * @param {string} id
+   * @param {string} typeId
+   * @param {{lon:number,lat:number,alt:number}} position
+   * @returns {C2Entity}
+   */
+  addC2(id, typeId, position) {
+    const c2 = new C2Entity(id, typeId, position, this._registry);
+    this._c2s.set(id, c2);
+    return c2;
+  }
+
   /** @returns {ThreatEntity[]} */
   getAllThreats() { return Array.from(this._threats.values()); }
   /** @returns {ShooterEntity[]} */
   getAllShooters() { return Array.from(this._shooters.values()); }
   /** @returns {SensorEntity[]} */
   getAllSensors() { return Array.from(this._sensors.values()); }
+  /** @returns {C2Entity[]} */
+  getAllC2s() { return Array.from(this._c2s.values()); }
   /** @returns {InterceptorEntity[]} */
   getAllInterceptors() { return Array.from(this._interceptors.values()); }
 
   // ═══════════════════════════════════════════════════════════
-  //  Pk 계산
-  // ═══════════════════════════════════════════════════════════
-
-  /**
-   * 교전 확률을 계산한다.
-   * @param {ThreatEntity} threat
-   * @param {ShooterEntity} shooter
-   * @returns {number} 0.0 ~ 1.0
-   */
-  computePk(threat, shooter) {
-    const cap = this._registry.getShooterCapability(shooter.typeId);
-    if (!cap) return 0;
-
-    const basePk = cap.pkTable[threat.typeId];
-    if (!basePk) return 0;
-
-    const dist = slantRange(shooter.position, threat.position);
-    if (dist > cap.maxRange) return 0;
-
-    const rangeFactor = Math.max(0, 1 - (dist / cap.maxRange) ** 2);
-    const maneuverPenalty = threat.isManeuvering() ? 0.85 : 1.0;
-
-    return basePk * rangeFactor * maneuverPenalty;
-  }
-
-  // ═══════════════════════════════════════════════════════════
-  //  step(dt) — 메인 시뮬레이션 루프
+  //  step(dt) — 7단계 시뮬레이션 파이프라인
   // ═══════════════════════════════════════════════════════════
 
   /**
@@ -231,36 +248,33 @@ export class SimEngine {
     const dtSim = Math.min(dt, MAX_DT) * this.timeScale;
     this.simTime += dtSim;
 
-    this._stepThreats(dtSim);
-    this._stepSensors(dtSim);
-    this._stepEngagements(dtSim);
-    this._stepInterceptors(dtSim);
-    this._stepCollisions(dtSim);
-    this._checkComplete();
+    this._stepThreats(dtSim);             // 1. 위협 이동
+    this._stepSensors(dtSim);             // 2. 센서 탐지
+    this._stepKillchain(dtSim);           // 3. 킬체인 진행
+    this._stepEngagementDecision(dtSim);  // 4. 교전 판정
+    this._stepInterceptors(dtSim);        // 5. 요격미사일 유도
+    this._stepCollisions(dtSim);          // 6. 충돌 판정
+    this._checkComplete();                // 7. 종료 판정
   }
 
-  // ── Phase 1: 위협 이동 ──
+  // ── Stage 1: 위협 이동 ──
 
   /** @private */
   _stepThreats(dt) {
     for (const threat of this._threats.values()) {
       if (threat.state === 'intercepted' || threat.state === 'leaked') continue;
 
-      // 비행 진행률 업데이트
       const elapsed = this.simTime - threat.launchTime;
       threat.flightProgress = Math.min(1.0, elapsed / (threat._estimatedFlightTime || 300));
 
-      // 속도 계산
       const threatType = this._registry.getThreatType(threat.typeId);
       const speedMult = threat.getCurrentSpeedMult();
       const speed = threatType.speed * speedMult;
 
-      // 첫 프레임에서 초기 속도 설정 (origin → target 방향)
       if (threat.velocity.x === 0 && threat.velocity.y === 0 && threat.velocity.z === 0) {
         this._initThreatVelocity(threat, speed);
       }
 
-      // 속도 크기 업데이트 (방향 유지, 크기만 변경)
       const velMag = Math.sqrt(
         threat.velocity.x ** 2 + threat.velocity.y ** 2 + threat.velocity.z ** 2
       );
@@ -273,21 +287,21 @@ export class SimEngine {
         };
       }
 
-      // 탄도 궤적 적분
       const result = ballisticTrajectory(threat.position, threat.velocity, dt);
       threat.position = result.pos;
       threat.velocity = result.vel;
 
-      // 상태 업데이트
       if (threat.position.alt <= 0 || threat.flightProgress >= 1.0) {
         threat.state = 'leaked';
-        this.emit('threat-leaked', {
-          threatId: threat.id,
-          position: { ...threat.position },
-          simTime: this.simTime
+        this._eventLog.log({
+          threatId: threat.id, eventType: 'THREAT_LEAKED', simTime: this.simTime,
+          data: { position: { ...threat.position } }
         });
+        this.emit('threat-leaked', {
+          threatId: threat.id, position: { ...threat.position }, simTime: this.simTime
+        });
+        this._killchain.cancelKillchain(threat.id);
       } else {
-        // 비행 단계 이름 업데이트
         const phase = threat.getCurrentPhase();
         if (phase === 0) threat.state = 'boost';
         else if (phase === 1) threat.state = 'midcourse';
@@ -296,17 +310,12 @@ export class SimEngine {
     }
   }
 
-  /**
-   * 위협의 초기 ECEF 속도를 origin→target 방향으로 설정한다.
-   * @private
-   */
+  /** @private */
   _initThreatVelocity(threat, speed) {
-    // 간단한 방향 계산: lat/lon 차이 → 근사 ECEF 방향
     const dLon = (threat.target.lon - threat.origin.lon) * Math.PI / 180;
     const dLat = (threat.target.lat - threat.origin.lat) * Math.PI / 180;
     const latR = threat.origin.lat * Math.PI / 180;
 
-    // ENU 방향 → ECEF 근사
     const east = dLon * Math.cos(latR);
     const north = dLat;
     const mag = Math.sqrt(east * east + north * north);
@@ -316,7 +325,6 @@ export class SimEngine {
       return;
     }
 
-    // ENU를 ECEF로 근사 변환
     const lonR = threat.origin.lon * Math.PI / 180;
     const sinLon = Math.sin(lonR);
     const cosLon = Math.cos(lonR);
@@ -326,9 +334,7 @@ export class SimEngine {
     const eNorm = east / mag;
     const nNorm = north / mag;
 
-    // ECEF = eNorm * East + nNorm * North + upComponent
-    // 탄도미사일: 초기 상승 성분 추가
-    const upComponent = 0.3; // 부스트 단계 상승
+    const upComponent = 0.3;
     const horizScale = Math.sqrt(1 - upComponent * upComponent);
 
     threat.velocity = {
@@ -338,7 +344,7 @@ export class SimEngine {
     };
   }
 
-  // ── Phase 2: 센서 탐지 ──
+  // ── Stage 2: 센서 탐지 ──
 
   /** @private */
   _stepSensors(_dt) {
@@ -351,25 +357,14 @@ export class SimEngine {
       for (const threat of this._threats.values()) {
         if (threat.state === 'intercepted' || threat.state === 'leaked') continue;
         if (!sensor.canDetect(threat.typeId)) continue;
-
-        // 최소 탐지 고도 체크
         if (threat.position.alt < cap.minDetectionAltitude) continue;
 
-        // 구면 부채꼴 탐지
         const inSector = isInSector(
-          sensor.position,
-          threat.position,
-          sensor._azCenter || 0,
-          cap.fov.azHalf,
-          cap.fov.elMax,
-          cap.maxRange
+          sensor.position, threat.position,
+          sensor._azCenter || 0, cap.fov.azHalf, cap.fov.elMax, cap.maxRange
         );
+        if (!inSector) continue;
 
-        if (!inSector) {
-          continue;
-        }
-
-        // 탐지 확률 계산
         const dist = slantRange(sensor.position, threat.position);
         const threatType = this._registry.getThreatType(threat.typeId);
         const rcs = threatType.signature.rcs;
@@ -381,10 +376,12 @@ export class SimEngine {
           sensor.addDetection(threat.id, threat.typeId, this.simTime);
 
           if (!alreadyDetected) {
+            this._eventLog.log({
+              threatId: threat.id, eventType: 'THREAT_DETECTED', simTime: this.simTime,
+              data: { sensorId: sensor.id }
+            });
             this.emit('threat-detected', {
-              threatId: threat.id,
-              sensorId: sensor.id,
-              simTime: this.simTime
+              threatId: threat.id, sensorId: sensor.id, simTime: this.simTime
             });
           }
         }
@@ -392,67 +389,119 @@ export class SimEngine {
     }
   }
 
-  // ── Phase 3: 교전 판정 ──
+  // ── Stage 3: 킬체인 진행 ──
 
   /** @private */
-  _stepEngagements(_dt) {
+  _stepKillchain(_dt) {
+    // 탐지된 위협 중 킬체인 미시작 → 킬체인 시작
     for (const threat of this._threats.values()) {
       if (threat.state === 'intercepted' || threat.state === 'leaked') continue;
       if (this._engagedThreats.has(threat.id)) continue;
+      if (this._killchain.getState(threat.id)) continue; // 이미 킬체인 진행 중
 
-      // 탐지 여부 확인
-      let detected = false;
+      // 센서에서 탐지 여부 확인
+      let detectedBy = null;
       for (const sensor of this._sensors.values()) {
         if (sensor.detectedThreats.some(d => d.threatId === threat.id)) {
-          detected = true;
+          detectedBy = sensor.id;
           break;
         }
       }
-      if (!detected) continue;
+      if (!detectedBy) continue;
+
+      this._killchain.startKillchain(threat.id, detectedBy, this.simTime);
+    }
+
+    // 킬체인 타이머 진행
+    this._killchain.update(this.simTime);
+  }
+
+  // ── Stage 4: 교전 판정 (킬체인 완료 후) ──
+
+  /** @private */
+  _stepEngagementDecision(_dt) {
+    const readyList = this._killchain.getReadyToEngage();
+
+    for (const kcState of readyList) {
+      const threat = this._threats.get(kcState.threatId);
+      if (!threat) continue;
+      if (threat.state === 'intercepted' || threat.state === 'leaked') {
+        this._killchain.cancelKillchain(kcState.threatId);
+        continue;
+      }
+      if (this._engagedThreats.has(threat.id)) continue;
 
       // 사수 선정
       const candidates = this._registry.getPrioritizedShooters(threat.typeId);
       for (const candidate of candidates) {
-        // 해당 타입의 사수 인스턴스 찾기
         const shooter = this._findAvailableShooter(candidate.typeId, threat);
         if (!shooter) continue;
 
-        const pk = this.computePk(threat, shooter);
-        if (pk <= 0) continue;
-
-        // 고도 체크
+        // physics 함수에 전달할 shooter 객체 (capability 포함)
         const cap = this._registry.getShooterCapability(shooter.typeId);
-        const threatAltKm = threat.position.alt / 1000;
-        if (threatAltKm < cap.minAlt || threatAltKm > cap.maxAlt) continue;
+        if (!cap) continue;
+        const shooterForPhysics = { position: shooter.position, capability: cap };
 
-        // 교전 실행
-        const interceptorId = `INT_${Date.now()}_${shooter.id}`;
-        const interceptor = new InterceptorEntity(interceptorId, {
-          position: { ...shooter.position },
-          speed: cap.interceptorSpeed,
-          boostTime: cap.boostTime,
-          navConstant: cap.navConstant,
-          targetThreatId: threat.id,
-          shooterId: shooter.id
-        });
-        interceptor._pk = pk;
-        interceptor._prevDist = Infinity;
+        // STEP 1: 교전구역 판정
+        const interceptPoint = predictInterceptPoint(threat, shooterForPhysics);
+        if (!interceptPoint) continue;
 
-        this._interceptors.set(interceptorId, interceptor);
-        shooter.fire(threat.id);
-        this._engagedThreats.add(threat.id);
+        // STEP 2: 발사 시점 판정
+        const launchOffset = calculateLaunchTime(threat, shooterForPhysics, interceptPoint);
+        // launchOffset은 "지금부터 대기해야 할 시간"
+        // 0이면 즉시 발사, 양수면 아직 이름
+        if (launchOffset > 0.5) continue; // 아직 발사 시점 아님 (0.5초 허용)
 
-        this.emit('engagement-start', {
-          threatId: threat.id,
-          shooterId: shooter.id,
-          interceptorId,
-          pk,
-          simTime: this.simTime
-        });
-
-        break; // 1위협 1사수 (Phase 1 MVP)
+        // STEP 3: 예측 Pk 판정
+        const pk = predictedPk(shooterForPhysics, interceptPoint, threat);
+        if (pk >= PK_ENGAGE_THRESHOLD) {
+          this._fireInterceptor(threat, shooter, interceptPoint, pk, kcState);
+          break;
+        } else if (pk >= PK_EMERGENCY_THRESHOLD) {
+          // 긴급 교전: 잔여 교전 기회 ≤ 2
+          this._fireInterceptor(threat, shooter, interceptPoint, pk, kcState);
+          break;
+        }
+        // Pk < 0.10 → 다음 사수 시도
       }
     }
+  }
+
+  /**
+   * 요격미사일을 발사한다.
+   * @private
+   */
+  _fireInterceptor(threat, shooter, interceptPoint, pk, kcState) {
+    const cap = this._registry.getShooterCapability(shooter.typeId);
+    const interceptorId = `INT_${Math.floor(this.simTime * 1000)}_${shooter.id}`;
+
+    const interceptor = new InterceptorEntity(interceptorId, {
+      position: { ...shooter.position },
+      speed: cap.interceptorSpeed,
+      boostTime: cap.boostTime,
+      navConstant: cap.navConstant,
+      targetThreatId: threat.id,
+      shooterId: shooter.id,
+      killRadius: cap.killRadius,
+      warheadEffectiveness: cap.warheadEffectiveness,
+      interceptMethod: cap.interceptMethod
+    });
+    interceptor._prevDist = Infinity;
+
+    this._interceptors.set(interceptorId, interceptor);
+    shooter.fire(threat.id);
+    this._engagedThreats.add(threat.id);
+    this._killchain.completeKillchain(threat.id);
+
+    this._eventLog.log({
+      threatId: threat.id, eventType: 'ENGAGEMENT_FIRED', simTime: this.simTime,
+      data: { shooterId: shooter.id, interceptorId, pk, interceptPoint }
+    });
+
+    this.emit('engagement-start', {
+      threatId: threat.id, shooterId: shooter.id,
+      interceptorId, pk, simTime: this.simTime
+    });
   }
 
   /**
@@ -469,7 +518,7 @@ export class SimEngine {
     return null;
   }
 
-  // ── Phase 4: 요격미사일 유도 ──
+  // ── Stage 5: 요격미사일 유도 ──
 
   /** @private */
   _stepInterceptors(dt) {
@@ -482,24 +531,15 @@ export class SimEngine {
         continue;
       }
 
-      // 부스트 업데이트
       interceptor.updateBoost(dt);
 
       if (interceptor.isInBoost()) {
-        // 부스트: 수직 상승
         this._boostInterceptor(interceptor, dt);
       } else {
-        // PNG 유도
         interceptor.velocity = pngGuidance(
-          interceptor.position,
-          interceptor.velocity,
-          threat.position,
-          interceptor.speed,
-          dt,
-          interceptor.navConstant
+          interceptor.position, interceptor.velocity,
+          threat.position, interceptor.speed, dt, interceptor.navConstant
         );
-
-        // 궤적 적분
         const result = ballisticTrajectory(interceptor.position, interceptor.velocity, dt);
         interceptor.position = result.pos;
         interceptor.velocity = result.vel;
@@ -507,15 +547,10 @@ export class SimEngine {
     }
   }
 
-  /**
-   * 부스트 단계: 수직 상승
-   * @private
-   */
+  /** @private */
   _boostInterceptor(interceptor, dt) {
     const latR = interceptor.position.lat * Math.PI / 180;
     const lonR = interceptor.position.lon * Math.PI / 180;
-
-    // 수직 (Up) 방향 ECEF
     const upX = Math.cos(latR) * Math.cos(lonR);
     const upY = Math.cos(latR) * Math.sin(lonR);
     const upZ = Math.sin(latR);
@@ -531,7 +566,7 @@ export class SimEngine {
     interceptor.velocity = result.vel;
   }
 
-  // ── Phase 5: 충돌 판정 ──
+  // ── Stage 6: 충돌 판정 ──
 
   /** @private */
   _stepCollisions(_dt) {
@@ -544,54 +579,52 @@ export class SimEngine {
         continue;
       }
 
-      // weapon-data에서 killRadius, warheadEffectiveness 조회
-      const shooter = this._shooters.get(interceptor.shooterId);
-      const cap = shooter ? this._registry.getShooterCapability(shooter.typeId) : null;
-      const killRadius = cap?.killRadius ?? 0.5;               // km (기본값 fallback)
-      const warheadEffectiveness = cap?.warheadEffectiveness ?? 0.75;
-
+      const killRadius = interceptor.killRadius || 0.5;
+      const warheadEff = interceptor.warheadEffectiveness || 0.75;
       const dist = slantRange(interceptor.position, threat.position);
 
-      // 충돌 판정 (weapon-specs 6.2: kill_radius 이내 도달 시 탄두 효과 판정)
       if (dist < killRadius) {
-        // proximity_factor = 1.0 - (closest_distance / kill_radius)²
         const proximityFactor = 1.0 - (dist / killRadius) ** 2;
-        const hitProbability = warheadEffectiveness * proximityFactor;
+        const hitProbability = warheadEff * proximityFactor;
 
-        // Bernoulli 시행
         if (Math.random() < hitProbability) {
           threat.state = 'intercepted';
           interceptor.state = 'hit';
+          this._eventLog.log({
+            threatId: threat.id, eventType: 'INTERCEPT_HIT', simTime: this.simTime,
+            data: { shooterId: interceptor.shooterId }
+          });
           this.emit('intercept-hit', {
-            threatId: threat.id,
-            shooterId: interceptor.shooterId,
-            simTime: this.simTime
+            threatId: threat.id, shooterId: interceptor.shooterId, simTime: this.simTime
           });
         } else {
           interceptor.state = 'miss';
+          this._eventLog.log({
+            threatId: threat.id, eventType: 'INTERCEPT_MISS', simTime: this.simTime,
+            data: { shooterId: interceptor.shooterId }
+          });
           this.emit('intercept-miss', {
-            threatId: threat.id,
-            shooterId: interceptor.shooterId,
-            simTime: this.simTime
+            threatId: threat.id, shooterId: interceptor.shooterId, simTime: this.simTime
           });
         }
         continue;
       }
 
-      // miss 판정: 거리가 증가하면 지나친 것
       if (interceptor._prevDist !== undefined && dist > interceptor._prevDist + MISS_DISTANCE_GROWTH) {
         interceptor.state = 'miss';
+        this._eventLog.log({
+          threatId: threat.id, eventType: 'INTERCEPT_MISS', simTime: this.simTime,
+          data: { shooterId: interceptor.shooterId }
+        });
         this.emit('intercept-miss', {
-          threatId: threat.id,
-          shooterId: interceptor.shooterId,
-          simTime: this.simTime
+          threatId: threat.id, shooterId: interceptor.shooterId, simTime: this.simTime
         });
       }
       interceptor._prevDist = dist;
     }
   }
 
-  // ── 종료 판정 ──
+  // ── Stage 7: 종료 판정 ──
 
   /** @private */
   _checkComplete() {
@@ -608,10 +641,8 @@ export class SimEngine {
         .filter(t => t.state === 'leaked').length;
 
       this.emit('simulation-end', {
-        finalSimTime: this.simTime,
-        totalThreats: this._threats.size,
-        destroyed,
-        leaked
+        finalSimTime: this.simTime, totalThreats: this._threats.size,
+        destroyed, leaked
       });
     }
   }
@@ -631,9 +662,7 @@ export class SimEngine {
     const loop = (timestamp) => {
       const dtReal = Math.min((timestamp - this._lastTimestamp) / 1000, MAX_DT);
       this._lastTimestamp = timestamp;
-
       this.step(dtReal);
-
       if (this.state === 'RUNNING') {
         this._rafId = requestAnimationFrame(loop);
       }
