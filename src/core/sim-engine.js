@@ -172,7 +172,21 @@ export class SimEngine {
     const threat = new ThreatEntity(id, typeId, { origin, target, launchTime }, this._registry);
     const dist = slantRange(origin, target);
     const threatType = this._registry.getThreatType(typeId);
-    threat._estimatedFlightTime = (dist * 1000) / threatType.speed;
+
+    // 비행시간 추정: 각 phase의 speedMult 가중 평균 + 포물선 경로 보정(×1.15)
+    const phases = threatType.flightProfile?.phases;
+    let avgSpeedMult = 1.0;
+    if (phases) {
+      let weightedSum = 0;
+      for (const p of phases) {
+        const pLen = p.range[1] - p.range[0];
+        const pAvgMult = (p.speedMult[0] + p.speedMult[1]) / 2;
+        weightedSum += pLen * pAvgMult;
+      }
+      avgSpeedMult = weightedSum; // range는 0~1 합산이므로 그대로 평균
+    }
+    const pathLengthFactor = 1.15; // 포물선 경로는 직선보다 약 15% 더 김
+    threat._estimatedFlightTime = (dist * 1000 * pathLengthFactor) / (threatType.speed * avgSpeedMult);
     this._threats.set(id, threat);
     this._eventLog.log({
       threatId: id, eventType: 'THREAT_SPAWNED', simTime: this.simTime,
@@ -325,7 +339,9 @@ export class SimEngine {
       threat.position = result.pos;
       threat.velocity = result.vel;
 
-      if (threat.position.alt <= 0 || threat.flightProgress >= 1.0) {
+      // 종료 판정: 지면 도달만으로 판정 (flightProgress는 프로파일 보간용)
+      // boost 직후 alt=0 체크 방지: flightProgress > 0.05 이후부터 판정
+      if (threat.position.alt <= 0 && threat.flightProgress > 0.05) {
         threat.state = 'leaked';
         this._eventLog.log({
           threatId: threat.id, eventType: 'THREAT_LEAKED', simTime: this.simTime,
