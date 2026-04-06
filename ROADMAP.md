@@ -7,48 +7,80 @@
 
 ---
 
-## Phase 1: L-SAM 1세트 + 탄도미사일 1발 (MVP)
-> 목표: 화면에서 탄도미사일이 날아오고, L-SAM이 요격하는 장면을 3D로 보여주기
+## Phase 1: 선형 C2 탄도탄 대응 MVP (조기경보 → KAMD → ICC → ECS → L-SAM)
+> 목표: GREEN_PINE이 탄도미사일을 탐지하고, KAMD→ICC→ECS 선형 킬체인을 거쳐
+> L-SAM이 ABM탄으로 요격하는 전 과정을 3D로 시각화
 
 ### 1.0 프로젝트 스캐폴딩
-- [x] 디렉토리 구조 생성 (ARCHITECTURE.md 기준)
-- [x] package.json 생성 (vitest 의존성)
-- [x] index.html 기본 Cesium Viewer 초기화
-- [x] patriot-sim.html에서 Cesium 초기화 패턴, CSS, HUD 레이아웃 추출
+- [ ] 디렉토리 구조 생성 (ARCHITECTURE.md 기준)
+- [ ] package.json 생성 (vitest 의존성)
+- [ ] index.html 기본 Cesium Viewer 초기화
+- [ ] patriot-sim.html에서 Cesium 초기화 패턴, CSS, HUD 레이아웃 추출
 
 ### 1.1 물리 엔진 기초
-- [x] `core/physics.js`: slantRange(pos1, pos2) 구현 + 테스트
-- [x] `core/physics.js`: ballisticTrajectory — 중력 포물선 궤적 구현 + 테스트
-- [x] `core/physics.js`: pngGuidance — patriot-sim.html의 pngGuide 함수 모듈화 + 테스트
-- [x] `core/physics.js`: isInSector — 구면 부채꼴 탐지 판정 (ENU 변환) + 테스트
+- [ ] `core/physics.js`: slantRange(pos1, pos2) 구현 + 테스트
+- [ ] `core/physics.js`: ballisticTrajectory — 중력 포물선 궤적 구현 + 테스트
+- [ ] `core/physics.js`: pngGuidance — patriot-sim.html의 pngGuide 함수 모듈화 + 테스트
+- [ ] `core/physics.js`: isInSector — 구면 부채꼴 탐지 판정 (ENU 변환) + 테스트
+- [ ] `core/physics.js`: predictInterceptPoint — 위협 궤적 예측 → 교전구역 내 요격 지점 산출 + 테스트
+- [ ] `core/physics.js`: calculateLaunchTime — 요격미사일 비행시간 역산 → 선제 발사 시점 + 테스트
+- [ ] `core/physics.js`: predictedPk — 예측 요격 지점 기준 의사결정용 Pk 계산 + 테스트
 
 ### 1.2 타입 레지스트리 + 엔티티 시스템
-- [x] `config/weapon-data.js`: L-SAM_ABM + MSAM_MFR + SRBM 타입 정의 (capability + relations)
-- [x] `core/registry.js`: Registry 클래스 — weapon-data 로딩, getPrioritizedShooters(), getDetectableThreats()
-- [x] `core/entities.js`: BaseEntity 클래스 (id, typeId, position, operational)
-- [x] `core/entities.js`: ShooterEntity (typeId로 Registry 참조, currentAmmo/status는 런타임 상태)
-- [x] `core/entities.js`: SensorEntity (typeId로 Registry 참조, currentTracking은 런타임 상태)
-- [x] `core/entities.js`: ThreatEntity (SRBM: Mach6, 3단계 비행프로파일)
-- [x] `core/entities.js`: InterceptorEntity (PNG 유도, 부스터+유도 단계)
+- [ ] `config/weapon-data.js`: 탄도탄 대응 최소 구성 타입 정의
+  - 센서: GREEN_PINE(조기경보, 800km), MSAM_MFR(다기능레이더, 탄도탄100km/항공기150km)
+  - C2: KAMD_OPS(사령부), ICC(대대), ECS(포대)
+  - 사수: L-SAM(ABM탄 + AAM탄 통합 체계)
+  - 위협: SRBM(Mach6, 3단계 비행프로파일)
+  - 토폴로지: GREEN_PINE→KAMD_OPS→ICC→ECS→L-SAM (선형 KAMD축)
+- [ ] `core/registry.js`: Registry 클래스 — weapon-data 로딩, getPrioritizedShooters(), buildTopology()
+- [ ] `core/entities.js`: BaseEntity (id, typeId, position, operational)
+- [ ] `core/entities.js`: SensorEntity (GREEN_PINE + MSAM_MFR)
+- [ ] `core/entities.js`: C2Entity (KAMD_OPS, ICC, ECS — 처리지연, pendingTracks)
+- [ ] `core/entities.js`: ShooterEntity (L-SAM — ABM탄/AAM탄, currentAmmo, status)
+- [ ] `core/entities.js`: ThreatEntity (SRBM: Mach6, 3단계 비행프로파일)
+- [ ] `core/entities.js`: InterceptorEntity (PNG 유도, 부스터+유도 단계)
 
-### 1.3 시뮬레이션 엔진
-- [x] `core/sim-engine.js`: SimEngine 클래스 — requestAnimationFrame 루프
-- [x] step(dt) 구현: 위협이동 → 센서탐지 → 교전판정 → 요격미사일유도 → 충돌판정
-- [x] 이벤트 버스: EventEmitter 패턴 (on/emit/off)
-- [x] 시뮬레이션 상태 머신: READY → RUNNING → PAUSED → COMPLETE
+### 1.3 시뮬레이션 엔진 + 선형 킬체인
+- [ ] `core/sim-engine.js`: SimEngine 클래스 — requestAnimationFrame 루프
+- [ ] step(dt) 구현:
+  1. 위협 이동 (ballisticTrajectory)
+  2. GREEN_PINE 탐지 (isInSector, 800km)
+  3. 선형 킬체인: GREEN_PINE→KAMD_OPS(16s링크+20~60s처리)→ICC(16s링크+5~15s처리)→ECS(1s링크+2~5s처리)
+  4. ECS: MSAM_MFR 가동, 예측 요격 지점 계산, 발사 시점 결정 (predictInterceptPoint, calculateLaunchTime)
+  5. 교전 판정 (predictedPk ≥ 0.30)
+  6. 요격미사일 발사 + PNG 유도 비행
+  7. 충돌 판정 (kill_radius + warhead_effectiveness)
+- [ ] 이벤트 버스: EventEmitter 패턴 (on/emit/off)
+- [ ] 시뮬레이션 상태 머신: READY → RUNNING → PAUSED → COMPLETE
 
-### 1.4 3D 시각화 (L-SAM 1세트)
-- [x] `viz/cesium-app.js`: Viewer 초기화, 의정부 지역 카메라
-- [x] `viz/radar-viz.js`: L-SAM MFR 구면 부채꼴 와이어프레임 (patriot-sim.html 패턴)
-- [x] `viz/engagement-viz.js`: 위협 궤적 렌더링 (빨간 점 + 꼬리)
-- [x] `viz/engagement-viz.js`: 요격미사일 궤적 렌더링 (초록 점 + 꼬리)
-- [x] `viz/engagement-viz.js`: 폭발 이펙트 (Ellipsoid 팽창+소멸)
-- [x] `viz/hud.js`: 기본 HUD (포대 상태, 교전 로그)
+### 1.4 3D 시각화 (선형 C2 탄도탄 대응)
+> 목표: GREEN_PINE이 탐지 → KAMD→ICC→ECS 지휘통제 흐름 → MFR 추적 → L-SAM 요격까지
+> 전체 과정을 3D로 시각화
+
+- [ ] `viz/cesium-app.js`: Viewer 초기화, 한반도 중부 카메라
+- [ ] `viz/radar-viz.js`: GREEN_PINE 구면 부채꼴 와이어프레임 (800km, 호버 시 표시)
+- [ ] `viz/radar-viz.js`: MSAM_MFR 구면 부채꼴 와이어프레임 (100km, 호버 시 표시)
+- [ ] `viz/network-viz.js`: C2 노드 배치 (KAMD_OPS, ICC, ECS를 지도 위에 아이콘 표시)
+- [ ] `viz/network-viz.js`: 데이터링크 시각화 (GREEN_PINE→KAMD_OPS→ICC→ECS 연결선, 킬체인 진행 시 활성화 애니메이션)
+- [ ] `viz/engagement-viz.js`: SRBM 궤적 렌더링 (빨간 점 + 포물선 꼬리)
+- [ ] `viz/engagement-viz.js`: 요격미사일 궤적 렌더링 (초록 점 + 꼬리)
+- [ ] `viz/engagement-viz.js`: 폭발 이펙트 (Ellipsoid 팽창+소멸)
+- [ ] `viz/hud.js`: 기본 HUD
+  - 킬체인 진행 상태 (GREEN_PINE 탐지 → KAMD 분석중 → ICC 명령 → ECS 발사)
+  - 포대 상태 (L-SAM 탄약, 교전 상태)
+  - 교전 결과 로그
 
 ### 1.5 통합 + 데모
-- [x] index.html에서 L-SAM 1세트 배치 + 탄도미사일 1발 발사 → 요격 시나리오 실행
-- [x] 버튼: "위협 발사", "초기화", 재생속도 조절
-- [x] Phase 1 스모크 테스트 통과 확인
+- [ ] index.html에서 전체 배치:
+  - GREEN_PINE (후방 배치, 조기경보)
+  - KAMD_OPS (오산 기준)
+  - ICC (대대급, 전방)
+  - ECS + MSAM_MFR + L-SAM 포대 (전방 배치)
+  - SRBM 발사원점 (북방)
+- [ ] 시나리오: SRBM 1발 발사 → GREEN_PINE 탐지 → 선형 킬체인 진행(~61~114s) → L-SAM ABM탄 선제 발사 → PNG 유도 → 요격
+- [ ] 버튼: "위협 발사", "초기화", 재생속도 조절
+- [ ] Phase 1 스모크 테스트 통과 확인
 
 ---
 
@@ -57,7 +89,7 @@
 
 ### 2.1 킬체인 프로세스
 - [ ] `core/killchain.js`: KillChainProcess 상태 머신
-- [ ] LinearKillChain: 6단계 시간 지연 (Promise 체인)
+- [ ] LinearKillChain: 5단계 킬체인 (GREEN_PINE→KAMD_OPS→ICC→ECS→발사, 링크16s+처리지연)
 - [ ] 킬체인 진행 상태 이벤트 발행 (각 단계 시작/완료)
 
 ### 2.2 다중 위협
@@ -86,7 +118,7 @@
 - [ ] 실시간 메트릭 비교 패널 (S2S, 누출률, 교전성공률)
 
 ### 3.3 C2 토폴로지 시각화
-- [ ] Linear: 계층적 트리 (MCRC→대대→포대)
+- [ ] Linear: 계층적 트리 (KAMD_OPS/MCRC → ICC → ECS → 사수)
 - [ ] Kill Web: IAOC 중심 메시 네트워크 (IBCS 영상 스타일)
 - [ ] 데이터 흐름 애니메이션 (cyan 점선)
 
@@ -98,7 +130,7 @@
 ### 4.1 무기체계 확장
 - [ ] PAC-3, 천궁-II, THAAD, 비호, KF-16, 천궁-I, 천마 추가
 - [ ] 센서: EWR(500km), GREEN_PINE(800km), FPS117, TPS880K 추가
-- [ ] C2: MCRC, 대대TOC, EOC, KAMD작전센터, 육군방공 추가
+- [ ] C2: KAMD_OPS, MCRC, ICC, ECS, EOC, IAOC 추가
 
 ### 4.2 한반도 배치
 - [ ] 5개 방어구역 (전방/수도권/중부/남부)

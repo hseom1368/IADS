@@ -41,30 +41,31 @@ v0.7.3의 ontology.py + config.py + registry.py 역할을 통합.
 ```javascript
 // 구조 예시 (Object.freeze로 불변)
 export const SHOOTER_TYPES = Object.freeze({
-  LSAM_ABM: {
-    name: 'L-SAM (탄도탄)',
-    capability: {
-      maxRange: 150, minRange: 20,
-      maxAlt: 60, minAlt: 40,
-      pkTable: { SRBM: 0.85 },
-      ammoCount: 6,
-      interceptMethod: 'hit-to-kill',
+  LSAM: {
+    name: 'L-SAM (장거리 지대공)',
+    missiles: {
+      ABM: { maxRange: 150, minRange: 20, maxAlt: 60, minAlt: 40,
+             pkTable: { SRBM: 0.85 }, interceptMethod: 'hit-to-kill', ammoCount: 6 },
+      AAM: { maxRange: 200, minRange: 10, maxAlt: 25, minAlt: 0.05,
+             pkTable: { AIRCRAFT: 0.90, CRUISE_MISSILE: 0.80, UAS: 0.60 },
+             interceptMethod: 'guided', ammoCount: 8 },
     },
+    priority: 'ABM_FIRST', // 탄도탄 위협 시 ABM탄 교전 최우선
     relations: {
-      reportingC2: 'KAMD_OPS',         // 어떤 C2에 보고하는가
-      engageableThreats: ['SRBM'],     // 어떤 위협을 교전 가능한가
-      requiredSensors: ['GREEN_PINE', 'MSAM_MFR'], // 어떤 센서의 큐잉이 필요한가
-      c2Axis: 'KAMD',                  // 3축 분리 시 어느 축에 속하는가
+      ecs: 'ECS',
+      icc: 'ICC',
+      commandC2: ['KAMD_OPS', 'MCRC'],   // 양축 통제 중복
+      c2Axis: ['KAMD', 'MCRC'],
+      engageableThreats: ['SRBM', 'AIRCRAFT', 'CRUISE_MISSILE', 'UAS'],
+      requiredSensors: ['GREEN_PINE', 'MSAM_MFR'],
     },
   },
-  // LAMD 추가 시: 여기에 새 항목만 선언
-  // LAMD: { name: '장사정포요격', capability: {...}, relations: {...} },
+  // 새 체계 추가 시 여기에 항목만 선언
 });
 
 export const SENSOR_TYPES = Object.freeze({ /* 동일 구조 */ });
 export const C2_TYPES = Object.freeze({ /* 동일 구조 */ });
 export const THREAT_TYPES = Object.freeze({ /* 동일 구조 */ });
-export const TOPOLOGY_RELATIONS = Object.freeze({ /* 센서→C2, C2→사수 매핑 */ });
 ```
 
 ### 2.3 core/registry.js — 엔티티 레지스트리 (질의 엔진)
@@ -114,8 +115,11 @@ InterceptorEntity { position, velocity, speed, boostTime, guidanceNav, targetThr
 - `cruiseMissileTrajectory(pos, target, speed, terrainHugging, dt)`: 저고도 순항
 - `pngGuidance(interceptorPos, interceptorVel, targetPos, speed, dt, N)`: 비례항법유도 (patriot-sim.html에서 추출)
 - `slantRange(pos1, pos2)`: 3D 경사거리 (km)
-- `isInSector(sensorPos, targetPos, azCenter, azHalf, elMax, maxRange)`: 구면 부채꼴 탐지 판정 (patriot-sim.html의 inDetectSector 패턴)
-- `detectionProbability(distance, maxRange, rcs, jamming)`: P = max(0, 1-(d/Reff)²)×(1-jam), Reff = R×(RCS/1.0)^0.25
+- `isInSector(sensorPos, targetPos, azCenter, azHalf, elMax, maxRange)`: 구면 부채꼴 탐지 판정
+- `detectionProbability(distance, maxRange, rcs, jamming)`: 탐지확률
+- `predictInterceptPoint(threat, shooter)`: 위협 궤적 예측 → 사수 교전구역 내 요격 지점 산출
+- `calculateLaunchTime(threat, shooter, interceptPoint)`: 요격미사일 비행시간 역산 → 발사 시점 결정
+- `predictedPk(shooter, interceptPoint, threat)`: 예측 요격 지점 기준 의사결정용 Pk 계산 (섹션 6.1)
 
 ### 2.6 core/killchain.js — Strategy 패턴 + 킬체인 프로세스
 
@@ -135,43 +139,73 @@ ArchitectureStrategy {
 
 **LinearKillChain** (ArchitectureStrategy 구현):
 ```
-센서→C2 보고(5~15s) → 축별 C2 큐 대기 → 위협평가+승인(15~120s)
-→ 무기큐잉(3~10s) → 레이더 추적(5~15s) → 화력통제(2~5s) → 사수통보(5~15s)
-총 ~48~160초
+GREEN_PINE→KAMD_OPS (16s링크)
+→ KAMD_OPS 분석+교전지시 (20~60s처리)
+→ KAMD_OPS→ICC (16s링크)
+→ ICC 명령하달 (5~15s처리)
+→ ICC→ECS (1s링크)
+→ ECS: 포대 MFR 가동+추적(동시병행) → 발사시점 결정 → 발사 (2~5s처리, 1s링크)
+총 S2S: 61~114초 (장거리 링크 32s + 사령부 분석이 지배적)
 ```
 - identifyThreatType: ballistic 시그니처 + MLRS → **70% 확률 SRBM 오인식**
 - fuseTracks: 융합 없음 (단일 센서 기반)
 - **다축 독립 킬체인**: 동일 위협이 다른 축에서 탐지 시 별도 킬체인 실행 → 중복교전 발생
+- **발사 시점**: ECS가 위협 궤적 예측 → 요격미사일 비행시간 역산 → 교전고도 도달 전 선제 발사
 
 **KillWebKillChain** (ArchitectureStrategy 구현):
 ```
-COP 자동 융합(1~2s) → 부하 분산 C2(1~3s) → 무기큐잉(1~3s)
-→ 자동큐잉 레이더(2.5~7.5s) → 사수통보(1~2s)
-총 ~7~23초
+모든센서→IAOC (1s링크): 컴포지트 트래킹
+→ IAOC 최적사수 선정 (1~3s처리)
+→ IAOC→EOC (1s링크)
+→ EOC 발사명령 (1~3s처리, 1s링크)
+총 S2S: 5~9초
 ```
 - identifyThreatType: 2개+ 센서 → 100% 정확, 단일 센서 → 10% 오인식
 - fuseTracks: √N 오차감소, fusion_bonus 최대 Pk +10%
 - updateCop: 매 스텝 전 사수 pos/ammo/engaged/operational 공유
-- selectShooter: score = Pk × (1/거리) × 탄약비율 × 부하계수 + friendly_bonus(0.15)
+- selectShooter: score = **base_pk** × (1/거리) × 탄약비율 × 부하계수 + friendly_bonus(0.15)
+  ※ base_pk = 무기체계 고유 Pk (weapon-data의 pkTable), predicted_Pk가 아님. 거리는 별도 항으로 분리하여 이중 계산 방지
 
-### 2.6.1 교전 판정 로직 (SimEngine에서 호출)
+### 2.6.1 교전 모델 — 2단계 (SimEngine에서 호출)
+
+**의사결정 단계** (weapon-specs.md 섹션 6.1 + 7.2):
 ```
-_should_engage_now(threat):
-  if Pk ≥ 0.30 → ENGAGE
-  if distance ≤ 30km → ENGAGE (무조건)
-  if remaining_opportunities ≤ 2 → ENGAGE (Pk ≥ 0.10)
-  else → WAIT
+_should_engage(threat, shooter, simTime):
+  // STEP 1: 교전구역 판정
+  interceptPoint = predictInterceptPoint(threat, shooter)
+  if interceptPoint not in shooter.engagementZone → SKIP (이 사수 부적합)
 
-_execute_multi_engagement(threat, shooters):
-  for each shooter: independent Bernoulli(compute_pk)
-  if any hit → threat.destroy()
-  record engaged shooter types → prevent same-type re-engagement
-  allow different-type re-engagement (다층 핸드오프)
+  // STEP 2: 발사 시점 판정
+  launchTime = calculateLaunchTime(threat, shooter, interceptPoint)
+  if simTime < launchTime → WAIT (아직 이름)
+
+  // STEP 3: 예측 Pk 판정 (예측 요격 지점 기준)
+  d_intercept = slantRange(shooter.position, interceptPoint)
+  predictedPk = base_pk × (1-(d_intercept/R_max)²) × maneuver × jamming
+  if predictedPk ≥ 0.30 → ENGAGE
+  if remaining_opportunities ≤ 2 AND predictedPk ≥ 0.10 → ENGAGE (긴급)
+  else → WAIT
+```
+
+**물리 시뮬레이션 단계** (weapon-specs.md 섹션 6.2):
+```
+_execute_engagement(threat, shooter):
+  interceptor = createInterceptor(shooter) // PNG 유도 요격미사일 생성
+  // 매 프레임: interceptor가 pngGuidance로 비행
+  // 접근 거리 ≤ kill_radius → warhead effectiveness Bernoulli 판정
+  // 접근 실패 (연료 소진, 이탈) → MISS
+  
+_handle_multi_engagement(threat):
+  // 복수 요격미사일이 독립적으로 물리 비행
+  // 하나라도 HIT → threat.destroy()
+  // 동일 사수 유형 재교전 방지, 다른 유형 허용 (다층 핸드오프)
 ```
 
 ### 2.6.2 core/comms.js — 통신 채널 모델
-- `CommChannel`: 링크 유형별 지연 딕셔너리 (weapon-specs.md 섹션 8 참조)
-- `getDelay(linkType, architecture)`: 아키텍처별 지연 반환
+- `CommChannel`: 데이터링크 지연 (weapon-specs.md 섹션 8 참조)
+- 장거리 링크 16s: 조기경보→사령부, 사령부→대대, 축간
+- 단거리 링크 1s: ICC→ECS, ECS→발사대, MFR→ECS
+- Kill Web IFCN: 모든 링크 1s
 - `getLinkLatency(link, jammingLevel)`: 링크별 고유 열화계수 × 재밍 → threshold 초과 시 두절
 - Kill Web: `redundancy_factor = 0.5` (열화 50% 완화)
 - 킬체인의 각 Promise 딜레이에 CommChannel 지연 적용

@@ -77,7 +77,7 @@ scope: core|viz|config|test
 ## 주요 참조 문서
 - `ARCHITECTURE.md`: 시스템 설계, 모듈 의존 관계, **Strategy 패턴, 교전 판정 로직, 이벤트 로그**
 - `ROADMAP.md`: 개발 단계 + 진행 추적 ([ ] → [x])
-- `docs/weapon-specs.md`: 센서 7종, 사수 9종, 위협 5종 스펙 + **교전 정책, 통신 채널 모델, 시나리오 7개 정의**
+- `docs/weapon-specs.md`: 센서 7종, 사수 8종(L-SAM 통합), 위협 5종 스펙 + **교전 정책, 통신 채널 모델, 시나리오 7개 정의**
 - `docs/ibcs-concept.md`: IBCS 아키텍처, 킬웹 vs 킬체인 차이
 - `docs/visual-style-guide.md`: IBCS 영상 기반 3D 스타일 가이드 + **대규모 렌더링 최적화**
 
@@ -87,6 +87,13 @@ scope: core|viz|config|test
 3. CZML 사후 생성 → **실시간 시뮬레이션** 필요
 4. 5초 스텝으로 빠른 위협 교전기회 누락 → **프레임 단위 연속 시뮬레이션**
 5. COP engagement_plan이 select_shooter에 미반영 → **통합 의사결정** 필요
+6. C2 체인이 BATTALION_TOC 하나로 뭉뚱그려짐 → **ICC(대대)→ECS(포대) 계층적 분리** 필요
+7. 교전고도 진입 시 발사 → **교전고도 도달 전 선제 발사 (요격미사일 비행시간 역산)** 필요
+
+## C2 지휘통제 구조 (핵심 참조)
+선형 C2 킬체인: 조기경보레이더 → KAMD_OPS(사령부) → ICC(대대) → ECS(포대) → 사수
+Kill Web 킬체인: 모든센서 → IAOC(통합) → EOC(ICC+ECS 통합) → 사수
+상세: weapon-specs.md 섹션 4, ARCHITECTURE.md 섹션 2.6
 
 ## patriot-sim.html에서 재사용할 패턴
 - ✅ PNG 비례항법유도 함수 (`pngGuide`)
