@@ -96,8 +96,8 @@ describe('Phase 1.0: weapon-data.js', () => {
       const c = SHOOTER_TYPES.LSAM_ABM.capability;
       expect(c.maxRange).toBe(150);         // km
       expect(c.minRange).toBe(20);          // km
-      expect(c.maxAlt).toBe(60);            // km
-      expect(c.minAlt).toBe(40);            // km
+      expect(c.maxAlt).toBe(100);           // km
+      expect(c.minAlt).toBe(60);            // km
       expect(c.ammoCount).toBe(6);
       expect(c.interceptMethod).toBe('hit-to-kill');
     });
@@ -203,9 +203,9 @@ describe('Phase 1.0: weapon-data.js', () => {
   });
 
   describe('MSAM_MFR (다기능레이더)', () => {
-    it('탐지거리 100km, 추적용량 50이어야 한다', () => {
+    it('탐지거리 300km(탄도탄), 추적용량 50이어야 한다', () => {
       const c = SENSOR_TYPES.MSAM_MFR.capability;
-      expect(c.maxRange).toBe(100);
+      expect(c.maxRange).toBe(300);
       expect(c.trackingCapacity).toBe(50);
     });
 

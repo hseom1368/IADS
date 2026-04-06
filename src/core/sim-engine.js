@@ -411,16 +411,19 @@ export class SimEngine {
         if (!sensor.canDetect(threat.typeId)) continue;
         if (threat.position.alt < cap.minDetectionAltitude) continue;
 
+        // 위협 유형별 탐지거리 적용 (듀얼 모드 레이더 지원)
+        const effectiveRange = cap.maxRangeByThreat?.[threat.typeId] ?? cap.maxRange;
+
         const inSector = isInSector(
           sensor.position, threat.position,
-          sensor._azCenter || 0, cap.fov.azHalf, cap.fov.elMax, cap.maxRange
+          sensor._azCenter || 0, cap.fov.azHalf, cap.fov.elMax, effectiveRange
         );
         if (!inSector) continue;
 
         const dist = slantRange(sensor.position, threat.position);
         const threatType = this._registry.getThreatType(threat.typeId);
         const rcs = threatType.signature.rcs;
-        const rEff = cap.maxRange * Math.pow(rcs / 1.0, 0.25);
+        const rEff = effectiveRange * Math.pow(rcs / 1.0, 0.25);
         const pDetect = Math.max(0, 1 - (dist / rEff) ** 2);
 
         if (Math.random() < pDetect) {

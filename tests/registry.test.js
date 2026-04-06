@@ -125,9 +125,9 @@ describe('capability/type 조회', () => {
     expect(cap.interceptorSpeed).toBe(1500);
   });
 
-  it('getSensorCapability MSAM_MFR → maxRange=100', () => {
+  it('getSensorCapability MSAM_MFR → maxRange=300', () => {
     const cap = registry.getSensorCapability('MSAM_MFR');
-    expect(cap.maxRange).toBe(100);
+    expect(cap.maxRange).toBe(300);
     expect(cap.trackingCapacity).toBe(50);
   });
 

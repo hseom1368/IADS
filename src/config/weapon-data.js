@@ -31,8 +31,8 @@ export const SHOOTER_TYPES = deepFreeze({
     capability: {
       maxRange: 150,          // km
       minRange: 20,           // km
-      maxAlt: 60,             // km
-      minAlt: 40,             // km
+      maxAlt: 100,            // km
+      minAlt: 60,             // km
       pkTable: { SRBM: 0.85 },
       ammoCount: 6,
       interceptMethod: 'hit-to-kill',
@@ -95,7 +95,14 @@ export const SENSOR_TYPES = deepFreeze({
   MSAM_MFR: {
     name: 'MSAM MFR (천궁-II 레이더)',
     capability: {
-      maxRange: 100,                // km
+      maxRange: 300,                // km (탄도탄 기준, 최대)
+      maxRangeByThreat: {           // 위협 유형별 탐지거리 (km)
+        SRBM: 300,
+        MLRS_GUIDED: 300,
+        CRUISE_MISSILE: 250,
+        AIRCRAFT: 250,
+        UAS: 250
+      },
       trackingCapacity: 50,
       scanRate: 30,                 // rpm
       minDetectionAltitude: 30,     // m

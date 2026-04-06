@@ -272,8 +272,8 @@ describe('predictInterceptPoint', () => {
     capability: {
       maxRange: 150,
       minRange: 20,
-      maxAlt: 60,
-      minAlt: 40,
+      maxAlt: 100,
+      minAlt: 60,
       interceptorSpeed: 1500
     }
   };
@@ -296,8 +296,8 @@ describe('predictInterceptPoint', () => {
     const result = predictInterceptPoint(threat, shooter);
     if (result) {
       const altKm = result.alt / 1000;
-      expect(altKm).toBeGreaterThanOrEqual(40);
-      expect(altKm).toBeLessThanOrEqual(60);
+      expect(altKm).toBeGreaterThanOrEqual(60);
+      expect(altKm).toBeLessThanOrEqual(100);
     }
   });
 
@@ -418,8 +418,8 @@ describe('predictedPk', () => {
       pkTable: { SRBM: 0.85 },
       maxRange: 150,
       minRange: 20,
-      maxAlt: 60,
-      minAlt: 40
+      maxAlt: 100,
+      minAlt: 60
     }
   };
 
