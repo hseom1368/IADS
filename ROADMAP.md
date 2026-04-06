@@ -61,15 +61,15 @@
 > 목표: GREEN_PINE이 탐지 → KAMD→ICC→ECS 지휘통제 흐름 → MFR 추적 → L-SAM 요격까지
 > 전체 과정을 3D로 시각화
 
-- [ ] `viz/cesium-app.js`: Viewer 초기화, 한반도 중부 카메라
-- [ ] `viz/radar-viz.js`: GREEN_PINE 구면 부채꼴 와이어프레임 (800km, 호버 시 표시)
-- [ ] `viz/radar-viz.js`: MSAM_MFR 구면 부채꼴 와이어프레임 (100km, 호버 시 표시)
-- [ ] `viz/network-viz.js`: C2 노드 배치 (KAMD_OPS, ICC, ECS를 지도 위에 아이콘 표시)
-- [ ] `viz/network-viz.js`: 데이터링크 시각화 (GREEN_PINE→KAMD_OPS→ICC→ECS 연결선, 킬체인 진행 시 활성화 애니메이션)
-- [ ] `viz/engagement-viz.js`: SRBM 궤적 렌더링 (빨간 점 + 포물선 꼬리)
-- [ ] `viz/engagement-viz.js`: 요격미사일 궤적 렌더링 (초록 점 + 꼬리)
-- [ ] `viz/engagement-viz.js`: 폭발 이펙트 (Ellipsoid 팽창+소멸)
-- [ ] `viz/hud.js`: 기본 HUD
+- [x] `viz/cesium-app.js`: Viewer 초기화, 한반도 중부 카메라
+- [x] `viz/radar-viz.js`: GREEN_PINE 구면 부채꼴 와이어프레임 (800km, 호버 시 표시)
+- [x] `viz/radar-viz.js`: MSAM_MFR 구면 부채꼴 와이어프레임 (100km, 호버 시 표시)
+- [x] `viz/network-viz.js`: C2 노드 배치 (KAMD_OPS, ICC, ECS를 지도 위에 아이콘 표시)
+- [x] `viz/network-viz.js`: 데이터링크 시각화 (GREEN_PINE→KAMD_OPS→ICC→ECS 연결선, 킬체인 진행 시 활성화 애니메이션)
+- [x] `viz/engagement-viz.js`: SRBM 궤적 렌더링 (빨간 점 + 포물선 꼬리)
+- [x] `viz/engagement-viz.js`: 요격미사일 궤적 렌더링 (초록 점 + 꼬리)
+- [x] `viz/engagement-viz.js`: 폭발 이펙트 (Ellipsoid 팽창+소멸)
+- [x] `viz/hud.js`: 기본 HUD
   - 킬체인 진행 상태 (GREEN_PINE 탐지 → KAMD 분석중 → ICC 명령 → ECS 발사)
   - 포대 상태 (L-SAM 탄약, 교전 상태)
   - 교전 결과 로그
