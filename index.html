@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>KIDA ADSIM v2.0 — EADSIM-Lite</title>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body,#cesiumContainer{width:100%;height:100%;overflow:hidden;}
+  .cesium-viewer-bottom{display:none!important;}
+
+  #hud{position:absolute;top:12px;left:12px;width:240px;font-family:'Share Tech Mono',monospace;z-index:100;}
+  .hbox{background:rgba(0,4,2,0.91);border:1px solid rgba(0,255,136,0.28);padding:10px 13px;margin-bottom:5px;}
+  .hbox h3{font-family:'Orbitron',sans-serif;font-size:7px;letter-spacing:3px;color:#00ff88;
+    margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid rgba(0,255,136,0.15);}
+  .row{display:flex;justify-content:space-between;font-size:9px;margin-bottom:4px;}
+  .lbl{color:rgba(0,255,136,0.5);}
+  .gn{color:#00ff88;font-weight:bold;} .rd{color:#ff4444;font-weight:bold;}
+  .yl{color:#ffcc00;font-weight:bold;} .bl{color:#44aaff;font-weight:bold;}
+
+  #controls{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);display:flex;gap:6px;z-index:100;}
+  .btn{background:rgba(0,4,2,0.93);border:1px solid rgba(0,255,136,0.38);color:#00ff88;
+    font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;
+    padding:7px 11px;cursor:pointer;transition:all 0.18s;}
+  .btn:hover{background:rgba(0,255,136,0.1);box-shadow:0 0 8px rgba(0,255,136,0.2);}
+  .btn.r{border-color:rgba(255,68,68,0.38);color:#ff4444;}
+  .btn.r:hover{background:rgba(255,68,68,0.08);}
+</style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+
+<div id="hud">
+  <div class="hbox">
+    <h3>&#x25B8; KIDA ADSIM v2.0</h3>
+    <div class="row"><span class="lbl">Architecture</span><span class="gn" id="archLabel">LINEAR C2</span></div>
+    <div class="row"><span class="lbl">Status</span><span class="yl" id="simStatus">READY</span></div>
+    <div class="row"><span class="lbl">Sim Time</span><span class="bl" id="simTime">0.0s</span></div>
+  </div>
+</div>
+
+<div id="controls">
+  <button class="btn r" onclick="window.startSim && window.startSim()">&#x26A0; START</button>
+  <button class="btn" onclick="window.resetSim && window.resetSim()">&#x25A0; RESET</button>
+</div>
+
+<script type="module">
+// Cesium Ion token (from patriot-sim.html)
+Cesium.Ion.defaultAccessToken='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI3YTIzMzUyNi1iMzc4LTRhNzAtOTZkMi1kNjBjYWYwMTA0NDAiLCJpZCI6NDEzNTM4LCJpYXQiOjE3NzUyNjQ0MTJ9.qSkagM1v-8HG9ACbqK_ODu52FJ6g9Eb1l0qlvpZvI9Q';
+
+const viewer = new Cesium.Viewer('cesiumContainer', {
+  terrain: Cesium.Terrain.fromWorldTerrain(),
+  animation: false,
+  baseLayerPicker: false,
+  fullscreenButton: true,
+  geocoder: false,
+  homeButton: true,
+  infoBox: false,
+  sceneModePicker: false,
+  selectionIndicator: false,
+  timeline: false,
+  navigationHelpButton: false,
+  creditContainer: document.createElement('div'),
+  requestRenderMode: true,
+  scene3DOnly: true,
+});
+
+viewer.scene.globe.enableLighting = true;
+
+// Camera: Korean Peninsula center (Osan area)
+viewer.camera.flyTo({
+  destination: Cesium.Cartesian3.fromDegrees(127.0, 36.5, 800000),
+  orientation: {
+    heading: 0,
+    pitch: Cesium.Math.toRadians(-45),
+    roll: 0,
+  },
+  duration: 2,
+});
+</script>
+</body>
+</html>

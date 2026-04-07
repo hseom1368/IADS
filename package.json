@@ -1,0 +1,13 @@
+{
+  "name": "kida-adsim-v2",
+  "version": "2.0.0",
+  "description": "KIDA ADSIM v2.0 — EADSIM-Lite 기반 한국군 통합방공체계 C2 아키텍처 비교 M&S",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^3.1.1"
+  }
+}
