@@ -309,13 +309,17 @@ export function predictInterceptPoint(threat, shooter) {
   let pos = { ...threat.position };
   let vel = { ...threat.velocity };
 
+  // 교전구역 내에서 사수에 가장 가까운 지점을 찾는다
+  let bestPoint = null;
+  let bestDist = Infinity;
+
   for (let t = 0; t < PREDICT_MAX_TIME; t += PREDICT_DT) {
     const result = ballisticTrajectory(pos, vel, PREDICT_DT);
     pos = result.pos;
     vel = result.vel;
 
-    // 지면 도달 → 교전 불가
-    if (pos.alt <= 0) return null;
+    // 지면 도달 → 탐색 종료
+    if (pos.alt <= 0) break;
 
     const altKm = pos.alt / 1000;
     const dist = slantRange(shooter.position, pos);
@@ -323,11 +327,16 @@ export function predictInterceptPoint(threat, shooter) {
     // 교전구역 판정: minRange ≤ dist ≤ maxRange AND minAlt ≤ altKm ≤ maxAlt
     if (dist >= cap.minRange && dist <= cap.maxRange &&
         altKm >= cap.minAlt && altKm <= cap.maxAlt) {
-      return { lon: pos.lon, lat: pos.lat, alt: pos.alt };
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestPoint = { lon: pos.lon, lat: pos.lat, alt: pos.alt };
+      }
     }
+    // 교전구역을 통과했으면(이미 가까워졌다가 다시 멀어지면) 종료
+    if (bestPoint && dist > bestDist + 10) break;
   }
 
-  return null;
+  return bestPoint;
 }
 
 /**
@@ -382,13 +391,13 @@ export function predictedPk(shooter, interceptPoint, threat, jammingLevel = 0) {
   const basePk = (cap.pkTable && cap.pkTable[threat.typeId]) || 0;
   if (basePk === 0) return 0;
 
-  // 수평 거리 기반 rangeFactor (고도 차이로 인한 과도한 패널티 방지)
-  // 교전구역 내에 있으면 rangeFactor는 완만하게 감소
-  const horizDist = slantRange(
-    { lon: shooter.position.lon, lat: shooter.position.lat, alt: 0 },
-    { lon: interceptPoint.lon, lat: interceptPoint.lat, alt: 0 }
-  );
-  const rangeFactor = Math.max(0, 1 - (horizDist / cap.maxRange) ** 2);
+  // rangeFactor: 교전구역 경계 대비 여유 비율
+  // predictInterceptPoint가 교전구역 내 지점만 반환하므로
+  // dist/maxRange는 항상 ≤ 1.0 — 선형 감소로 완만하게 보정
+  const dist = slantRange(shooter.position, interceptPoint);
+  const ratio = dist / cap.maxRange;
+  // 교전구역 안쪽(ratio ≤ 0.7)이면 거의 패널티 없음, 외곽에서만 감소
+  const rangeFactor = ratio <= 0.7 ? 1.0 : Math.max(0, 1 - ((ratio - 0.7) / 0.3) ** 2);
   const isManeuvering = typeof threat.isManeuvering === 'function'
     ? threat.isManeuvering() : !!threat.maneuvering;
   const maneuverPenalty = isManeuvering ? 0.90 : 1.0;
