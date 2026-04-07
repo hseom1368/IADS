@@ -253,7 +253,10 @@ export function predictInterceptPoint(threatPos, threatVel, shooterPos, envelope
  * @param {number} timeToReachPip - 위협이 PIP에 도달하는 시간 (s, 현재 시점부터)
  * @param {number} missileSpeed - 미사일 속도 (m/s)
  * @param {number} [safetyMargin=3] - 안전 여유 (s)
- * @returns {{ launchTime: number, flyoutTime: number } | null} launchTime: 현재 시점부터 발사까지 (s), null if impossible
+ * @returns {{ launchTime: number, flyoutTime: number, overdue: boolean } | null}
+ *   launchTime: 현재 시점부터 발사까지 (s, 0이면 즉시 발사)
+ *   overdue: true이면 최적 발사 시점 경과 (즉시 발사 필요)
+ *   null: 미사일이 PIP까지 도달 불가 (flyoutTime > timeToReachPip 이고 PIP가 봉투를 벗어남)
  */
 export function calculateLaunchTime(shooterPos, pipPosition, timeToReachPip, missileSpeed, safetyMargin = 3) {
   const rangeToPipKm = slantRange(shooterPos, pipPosition);
@@ -261,9 +264,12 @@ export function calculateLaunchTime(shooterPos, pipPosition, timeToReachPip, mis
   const flyoutTime = rangeToPipM / missileSpeed;
   const launchTime = timeToReachPip - flyoutTime - safetyMargin;
 
-  if (launchTime < 0) return null; // 이미 발사 시점 경과
+  if (launchTime < 0) {
+    // 최적 발사 시점 경과 — 즉시 발사 필요
+    return { launchTime: 0, flyoutTime, overdue: true };
+  }
 
-  return { launchTime, flyoutTime };
+  return { launchTime, flyoutTime, overdue: false };
 }
 
 // 내부 상수 내보내기 (테스트용)

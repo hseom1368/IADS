@@ -308,14 +308,16 @@ describe('calculateLaunchTime', () => {
     expectClose(result.launchTime + result.flyoutTime + 3, timeToReachPip, 1);
   });
 
-  it('flyout 시간이 위협 도달 시간보다 길면 → null', () => {
+  it('flyout 시간이 위협 도달 시간보다 길면 → overdue (즉시 발사)', () => {
     const shooterPos = { lon: 127.0, lat: 37.0, alt: 150 };
     const pipPos = { lon: 127.0, lat: 38.0, alt: 50000 };
     const timeToReachPip = 5; // 매우 짧은 시간
     const missileSpeed = 100; // 느린 미사일
 
     const result = calculateLaunchTime(shooterPos, pipPos, timeToReachPip, missileSpeed, 3);
-    expect(result).toBeNull();
+    expect(result).not.toBeNull();
+    expect(result.launchTime).toBe(0);
+    expect(result.overdue).toBe(true);
   });
 
   it('L-SAM ABM (Mach 9) — PIP 100km 거리', () => {
