@@ -423,14 +423,14 @@ describe('predictedPk', () => {
     }
   };
 
-  it('L-SAM ABM vs SRBM, d≈55km → Pk ≈ 0.63 (weapon-specs 예시, ±10%)', () => {
-    // 요격지점: shooter에서 ~55km
+  it('L-SAM ABM vs SRBM, 수평거리≈33km → Pk ≈ 0.73 (수평거리 기반)', () => {
+    // 요격지점: shooter(37.0)에서 수평 ~33km (lat 37.3), 고도 50km
     const interceptPoint = { lon: 127.0, lat: 37.3, alt: 50000 };
     const threat = { typeId: 'SRBM', maneuvering: true };
     const pk = predictedPk(shooter, interceptPoint, threat);
-    // weapon-specs: 0.85 × 0.87 × 0.85 = 0.63
-    expect(pk).toBeGreaterThan(0.63 * 0.90);
-    expect(pk).toBeLessThan(0.63 * 1.10);
+    // 0.85 × 0.951 × 0.90 ≈ 0.73
+    expect(pk).toBeGreaterThan(0.65);
+    expect(pk).toBeLessThan(0.80);
   });
 
   it('maxRange 근처 → 0에 가까움', () => {
@@ -441,13 +441,13 @@ describe('predictedPk', () => {
     expect(pk).toBeLessThan(0.1);
   });
 
-  it('기동 위협 → 0.85 배율 적용', () => {
+  it('기동 위협 → 0.90 배율 적용', () => {
     const interceptPoint = { lon: 127.0, lat: 37.3, alt: 50000 };
     const nonManeuver = predictedPk(shooter, interceptPoint,
       { typeId: 'SRBM', maneuvering: false });
     const maneuver = predictedPk(shooter, interceptPoint,
       { typeId: 'SRBM', maneuvering: true });
-    expect(maneuver / nonManeuver).toBeCloseTo(0.85, 1);
+    expect(maneuver / nonManeuver).toBeCloseTo(0.90, 1);
   });
 
   it('미지 위협 타입 → 0 반환', () => {
@@ -482,12 +482,12 @@ describe('predictedPk', () => {
     expect(pkDefault).toBe(pkExplicit);
   });
 
-  it('weapon-specs 예시 완전 검증: 0.85 × 0.87 × 0.85 × 1.0 = 0.63', () => {
+  it('weapon-specs 예시 완전 검증: 0.85 × rangeFactor × 0.90 × 1.0', () => {
     const interceptPoint = { lon: 127.0, lat: 37.3, alt: 50000 };
     const threat = { typeId: 'SRBM', maneuvering: true };
     const pk = predictedPk(shooter, interceptPoint, threat, 0); // jamming=0
-    // weapon-specs: 0.85 × range_factor × 0.85 × 1.0
-    expect(pk).toBeGreaterThan(0.50);
-    expect(pk).toBeLessThan(0.75);
+    // 0.85 × 0.951(수평33km/150km) × 0.90 ≈ 0.73
+    expect(pk).toBeGreaterThan(0.65);
+    expect(pk).toBeLessThan(0.80);
   });
 });

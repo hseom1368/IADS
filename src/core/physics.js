@@ -382,9 +382,16 @@ export function predictedPk(shooter, interceptPoint, threat, jammingLevel = 0) {
   const basePk = (cap.pkTable && cap.pkTable[threat.typeId]) || 0;
   if (basePk === 0) return 0;
 
-  const dIntercept = slantRange(shooter.position, interceptPoint);
-  const rangeFactor = Math.max(0, 1 - (dIntercept / cap.maxRange) ** 2);
-  const maneuverPenalty = threat.maneuvering ? 0.85 : 1.0;
+  // 수평 거리 기반 rangeFactor (고도 차이로 인한 과도한 패널티 방지)
+  // 교전구역 내에 있으면 rangeFactor는 완만하게 감소
+  const horizDist = slantRange(
+    { lon: shooter.position.lon, lat: shooter.position.lat, alt: 0 },
+    { lon: interceptPoint.lon, lat: interceptPoint.lat, alt: 0 }
+  );
+  const rangeFactor = Math.max(0, 1 - (horizDist / cap.maxRange) ** 2);
+  const isManeuvering = typeof threat.isManeuvering === 'function'
+    ? threat.isManeuvering() : !!threat.maneuvering;
+  const maneuverPenalty = isManeuvering ? 0.90 : 1.0;
   const jammingPenalty = 1 - jammingLevel;
 
   return basePk * rangeFactor * maneuverPenalty * jammingPenalty;
