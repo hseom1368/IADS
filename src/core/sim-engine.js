@@ -478,7 +478,13 @@ export class SimEngine {
   _stepEngagement() {
     for (const threat of this.threats) {
       if (threat.state === 'intercepted' || threat.state === 'leaked' || threat.state === 'destroyed') continue;
-      if (threat.state === 'engaging') continue; // 이미 교전 중
+      if (threat.state === 'engaging') continue; // 이미 교전 중 (1발 비행중)
+
+      // S-L-S: 이 위협에 대해 이미 비행 중인 미사일이 있으면 발사 금지
+      const activeIntc = this.interceptors.some(i =>
+        i.targetThreatId === threat.id && i.state !== 'detonated' && i.state !== 'missed'
+      );
+      if (activeIntc) continue;
 
       const kc = this.killchainStates.get(threat.id);
       if (!kc || kc.stage !== KC_STAGE.ENGAGEMENT_READY) continue;
