@@ -13,6 +13,7 @@ import {
   calculateLaunchTime,
   closestApproachOnSegment,
   closestApproachDistance,
+  radarHorizon,
   DEG2RAD,
   EARTH_RADIUS_KM,
 } from '../src/core/physics.js';
@@ -448,5 +449,35 @@ describe('closestApproachDistance (segment-to-segment)', () => {
     const distWrapper = closestApproachOnSegment(prev, cur, target);
     const distDirect = closestApproachDistance(prev, cur, target, target);
     expect(distWrapper).toBeCloseTo(distDirect, 5);
+  });
+});
+
+// ════════════════════════════════════════════════════════════
+// 9. radarHorizon — 레이더 수평선
+// ════════════════════════════════════════════════════════════
+describe('radarHorizon', () => {
+  it('안테나 0m + 표적 0m → 0 km', () => {
+    expect(radarHorizon(0, 0)).toBe(0);
+  });
+
+  it('안테나 200m + SRBM 150km → ~1740km 이상', () => {
+    // sqrt(2×6371×0.2) + sqrt(2×6371×150) ≈ 50.5 + 1382 ≈ 1432
+    const h = radarHorizon(200, 150000);
+    expect(h).toBeGreaterThan(1400);
+    expect(h).toBeLessThan(1500);
+  });
+
+  it('안테나 200m + 순항미사일 30m → ~35km', () => {
+    // sqrt(2×6371×0.2) + sqrt(2×6371×0.03) ≈ 50.5 + 19.5 ≈ 70
+    // 실제: sqrt(2548.4) + sqrt(382.26) ≈ 50.5 + 19.6 ≈ 70km
+    const h = radarHorizon(200, 30);
+    expect(h).toBeGreaterThan(50);
+    expect(h).toBeLessThan(90);
+  });
+
+  it('높은 안테나(1000m) → 더 먼 수평선', () => {
+    const low = radarHorizon(200, 10000);
+    const high = radarHorizon(1000, 10000);
+    expect(high).toBeGreaterThan(low);
   });
 });

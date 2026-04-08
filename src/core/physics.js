@@ -15,6 +15,20 @@ const EARTH_RADIUS_KM = 6371;
 const GRAVITY = 9.80665; // m/s²
 
 /**
+ * 레이더 수평선 거리 계산 (지구 곡률 기반)
+ * EADSIM 표준: horizon = sqrt(2*R*h_ant) + sqrt(2*R*h_target)
+ *
+ * @param {number} antennaAltM - 안테나 고도 (m)
+ * @param {number} targetAltM - 표적 고도 (m)
+ * @returns {number} 수평선 거리 (km)
+ */
+export function radarHorizon(antennaAltM, targetAltM) {
+  const hAnt = Math.max(0, antennaAltM) / 1000;  // m → km
+  const hTgt = Math.max(0, targetAltM) / 1000;
+  return Math.sqrt(2 * EARTH_RADIUS_KM * hAnt) + Math.sqrt(2 * EARTH_RADIUS_KM * hTgt);
+}
+
+/**
  * WGS84 좌표 두 점 사이의 직선거리(slant range) 계산
  * @param {{ lon: number, lat: number, alt: number }} pos1 - 위치 1 (도, 도, m)
  * @param {{ lon: number, lat: number, alt: number }} pos2 - 위치 2 (도, 도, m)

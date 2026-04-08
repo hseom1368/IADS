@@ -28,8 +28,9 @@ export const SENSOR_TYPES = Object.freeze({
     minAltitude: 5000,
     jammingSusceptibility: 0.3,
     rcsRef: 0.1,
-    scanRate: 360,     // 회전형 (도/s, 전방위)
-    azimuthHalf: 180,  // 전방위
+    antennaHeight: 10,  // m (차량 탑재 안테나 기준, 배치 위치 alt에 가산)
+    scanRate: 360,      // 회전형 (도/s, 전방위)
+    azimuthHalf: 180,   // 전방위
     elevationMax: 90,
   },
   LSAM_MFR: {
@@ -48,6 +49,7 @@ export const SENSOR_TYPES = Object.freeze({
     minAltitude: 50,
     jammingSusceptibility: 0.5,
     rcsRef: 1.0,
+    antennaHeight: 8,   // m (차량 탑재)
     azimuthHalf: 180,
     elevationMax: 90,
   },

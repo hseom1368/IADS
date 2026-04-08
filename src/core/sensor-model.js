@@ -1,13 +1,14 @@
 /**
  * core/sensor-model.js — EADSIM-Lite SNR 기반 3단계 센서 모델
  *
+ * 0. 기하 사전 필터: 레이더 수평선 + 방위각/고각 섹터 + minAltitude
  * 1. SNR 기반 탐지확률: SNR = (R_ref/d)⁴ × (RCS/RCS_ref)
  * 2. 밴드별 재밍 + ECM 보정
  * 3. 3단계 상태머신: UNDETECTED → DETECTED → TRACKED → FIRE_CONTROL
  *    - 전이 시간 적용
  *    - 3회 연속 미탐지 → 추적 상실
  */
-import { slantRange } from './physics.js';
+import { slantRange, radarHorizon, isInSector } from './physics.js';
 import { SENSOR_STATE } from './entities.js';
 
 const BASE_DETECTION_RATE = 0.95;
@@ -54,28 +55,46 @@ export function applyJammingCorrection(pDetect, jammingLevel, jammingSusceptibil
  * @returns {{ state: string, pFinal: number, transitioned: boolean, event: string|null }}
  */
 export function updateSensorState(sensor, threat, registry, jammingLevel, dt, randomFn = Math.random) {
-  // 센서가 해당 위협 탐지 불가하면 스킵
-  if (!registry.canDetect(sensor.typeId, threat.typeId)) {
-    return { state: SENSOR_STATE.UNDETECTED, pFinal: 0, transitioned: false, event: null };
-  }
+  const UNDETECTED_RESULT = { state: SENSOR_STATE.UNDETECTED, pFinal: 0, transitioned: false, event: null };
 
-  // 거리 계산
-  const distanceKm = slantRange(sensor.position, threat.position);
+  // 센서가 해당 위협 탐지 불가하면 스킵
+  if (!registry.canDetect(sensor.typeId, threat.typeId)) return UNDETECTED_RESULT;
 
   // 위협 카테고리 결정
   const threatCategory = threat.typeId === 'SRBM' || threat.typeId === 'MLRS_GUIDED'
     ? 'ballistic' : 'aircraft';
 
   // 센서 파라미터 조회
+  const sensorSpec = registry.sensors[sensor.typeId];
   const ranges = registry.getSensorRanges(sensor.typeId, threatCategory);
-  if (!ranges) return { state: SENSOR_STATE.UNDETECTED, pFinal: 0, transitioned: false, event: null };
+  if (!ranges) return UNDETECTED_RESULT;
+
+  // ── STEP 0: 기하 사전 필터 ──────────────────────────────
+
+  // (a) minAltitude 체크
+  const minAlt = sensorSpec?.minAltitude ?? 0;
+  if (threat.position.alt < minAlt) return UNDETECTED_RESULT;
+
+  // (b) 레이더 수평선 체크
+  const antennaAltM = sensor.position.alt + (sensorSpec?.antennaHeight ?? 0);
+  const horizonKm = radarHorizon(antennaAltM, threat.position.alt);
+  const distanceKm = slantRange(sensor.position, threat.position);
+  if (distanceKm > horizonKm) return UNDETECTED_RESULT;
+
+  // (c) 방위각/고각 섹터 체크
+  const azHalf = sensorSpec?.azimuthHalf ?? 180;
+  const elMax = sensorSpec?.elevationMax ?? 90;
+  if (!isInSector(sensor.position, threat.position, ranges.detect, 0, azHalf, elMax, minAlt)) {
+    return UNDETECTED_RESULT;
+  }
+
+  // ── STEP 1: SNR 기반 탐지확률 ───────────────────────────
 
   const rcsRef = registry.getRcsRef(sensor.typeId);
   const susceptibility = registry.getJammingSusceptibility(sensor.typeId);
   const transitions = registry.getSensorTransitionTimes(sensor.typeId);
   const hasFC = registry.hasFireControlCapability(sensor.typeId);
 
-  // 1. SNR 기반 탐지확률
   const pDetect = calculateDetectionProbability(ranges.detect, distanceKm, threat.currentRCS, rcsRef);
 
   // 2. 재밍 + ECM 보정

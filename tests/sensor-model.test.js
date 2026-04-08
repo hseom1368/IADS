@@ -258,6 +258,40 @@ describe('updateSensorState — 상태 전이', () => {
     const result = updateSensorState(sensor, aircraft, registry, 0, 1, () => 0);
     expect(result.state).toBe(SENSOR_STATE.UNDETECTED);
   });
+
+  it('GREEN_PINE minAltitude=5000m: 고도 3000m 위협 → 미탐지', () => {
+    const sensor = new SensorEntity('GREEN_PINE_B', SENSOR_POS);
+    const lowThreat = new ThreatEntity('SRBM',
+      { lon: 127.0, lat: 38.0, alt: 3000 },
+      { lon: 127.0, lat: 37.0, alt: 0 });
+    lowThreat.currentRCS = 3.0;
+
+    const result = updateSensorState(sensor, lowThreat, registry, 0, 1, () => 0);
+    expect(result.state).toBe(SENSOR_STATE.UNDETECTED);
+  });
+
+  it('GREEN_PINE minAltitude=5000m: 고도 50000m 위협 → 탐지 가능', () => {
+    const sensor = new SensorEntity('GREEN_PINE_B', SENSOR_POS);
+    const highThreat = new ThreatEntity('SRBM',
+      { lon: 127.0, lat: 38.0, alt: 50000 },
+      { lon: 127.0, lat: 37.0, alt: 0 });
+    highThreat.currentRCS = 3.0;
+
+    const result = updateSensorState(sensor, highThreat, registry, 0, 1, () => 0);
+    expect(result.state).toBe(SENSOR_STATE.DETECTED);
+  });
+
+  it('LSAM_MFR minAltitude=50m: 고도 30m 순항미사일 → 미탐지', () => {
+    const sensor = new SensorEntity('LSAM_MFR', SENSOR_POS);
+    const cm = new ThreatEntity('CRUISE_MISSILE',
+      { lon: 127.0, lat: 37.1, alt: 30 },
+      { lon: 127.0, lat: 37.0, alt: 0 });
+    cm.currentRCS = 0.01;
+
+    // CRUISE_MISSILE이 LSAM_MFR detectableThreats에 있지만 minAltitude 미만
+    const result = updateSensorState(sensor, cm, registry, 0, 1, () => 0);
+    expect(result.state).toBe(SENSOR_STATE.UNDETECTED);
+  });
 });
 
 // ════════════════════════════════════════════════════════════
