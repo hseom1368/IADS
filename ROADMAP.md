@@ -13,32 +13,32 @@
 > S2S 84~137초의 선형 킬체인 지연을 시각적으로 확인.
 
 ### 1.0 프로젝트 스캐폴딩
-- [ ] 디렉토리 구조 생성 (ARCHITECTURE.md 기준)
-- [ ] package.json (vitest)
-- [ ] index.html 기본 Cesium Viewer
-- [ ] patriot-sim.html에서 Cesium 초기화, CSS, HUD 패턴 추출
+- [x] 디렉토리 구조 생성 (ARCHITECTURE.md 기준)
+- [x] package.json (vitest)
+- [x] index.html 기본 Cesium Viewer
+- [x] patriot-sim.html에서 Cesium 초기화, CSS, HUD 패턴 추출
 
 ### 1.1 물리 엔진 기초
-- [ ] `core/physics.js`: slantRange(pos1, pos2) + 테스트
-- [ ] `core/physics.js`: ballisticTrajectory — 중력 포물선 (SRBM 3단계 프로파일) + 테스트
-- [ ] `core/physics.js`: pngGuidance — patriot-sim.html pngGuide 모듈화 + 테스트
-- [ ] `core/physics.js`: isInSector — 구면 부채꼴 탐지 판정 + 테스트
-- [ ] `core/physics.js`: predictInterceptPoint — 위협 궤적 예측 → PIP 산출 + 테스트
-- [ ] `core/physics.js`: calculateLaunchTime — 미사일 속도 기반 t_flyout 역산 + 테스트
+- [x] `core/physics.js`: slantRange(pos1, pos2) + 테스트
+- [x] `core/physics.js`: ballisticTrajectory — 중력 포물선 (SRBM 3단계 프로파일) + 테스트
+- [x] `core/physics.js`: pngGuidance — patriot-sim.html pngGuide 모듈화 + 테스트
+- [x] `core/physics.js`: isInSector — 구면 부채꼴 탐지 판정 + 테스트
+- [x] `core/physics.js`: predictInterceptPoint — 위협 궤적 예측 → PIP 산출 + 테스트
+- [x] `core/physics.js`: calculateLaunchTime — 미사일 속도 기반 t_flyout 역산 + 테스트
 
 ### 1.2 타입 레지스트리 + 엔티티
-- [ ] `config/weapon-data.js`: Phase 1 최소 구성
+- [x] `config/weapon-data.js`: Phase 1 최소 구성
   - 센서: GREEN_PINE_B (L밴드 900km 조기경보), LSAM_MFR (S밴드 310km 화력통제)
   - C2: KAMD_OPS, ICC, ECS (운용원 숙련도 파라미터 포함)
   - 사수: L-SAM (ABM탄 PSSEK 테이블 + 교전 봉투 + 포대 구성 + 미사일 속도 Mach 9)
   - 위협: SRBM (3단계 비행프로파일, RCS 변화)
   - 토폴로지: GREEN_PINE_B → KAMD_OPS → ICC → ECS → L-SAM
   - 링크 지연: 장거리 16s, 단거리 1s
-- [ ] `core/registry.js`: Registry 클래스
+- [x] `core/registry.js`: Registry 클래스
   - lookupPSSEK(), isInEnvelope(), getPrioritizedShooters()
   - getSensorRanges(), getJammingSusceptibility()
   - buildTopology('linear')
-- [ ] `core/entities.js`:
+- [x] `core/entities.js`:
   - SensorEntity (trackStates Map — 3단계 상태머신)
   - C2Entity (processingQueue, operatorSkill)
   - BatteryEntity (ammo, activeEngagements, maxSimultaneous, bdaPending)
@@ -46,26 +46,26 @@
   - InterceptorEntity (missileSpeed, guidanceType, pssekPk, killRadius)
 
 ### 1.3 센서 모델 + 교전 모델
-- [ ] `core/sensor-model.js`: SNR 기반 탐지확률
+- [x] `core/sensor-model.js`: SNR 기반 탐지확률
   - SNR_ratio = (R_ref/d)⁴ × (RCS/RCS_ref)
   - P_detect = min(0.99, SNR^0.5 × 0.95)
   - 밴드별 재밍 보정 (jammingSusceptibility)
-- [ ] `core/sensor-model.js`: 3단계 센서 상태머신
+- [x] `core/sensor-model.js`: 3단계 센서 상태머신
   - UNDETECTED → DETECTED → TRACKED → FIRE_CONTROL
   - 전이 시간, 3회 연속 미탐지 → 추적 상실
-- [ ] `core/engagement-model.js`: PSSEK 5단계 교전 판정
+- [x] `core/engagement-model.js`: PSSEK 5단계 교전 판정
   - STEP 1: 교전 봉투 판정
   - STEP 2: 센서 교전급 추적 확인
   - STEP 3: 발사 시점 (missileSpeed 기반 t_flyout)
   - STEP 4: PSSEK 조회 + 보정 (재밍, 접근각)
   - STEP 5: S-L-S 교리 + BDA 타이머
-- [ ] `core/engagement-model.js`: 발사 후 판정
+- [x] `core/engagement-model.js`: 발사 후 판정
   - PNG 비행 → kill_radius 도달 → Math.random() < Pk → HIT/MISS
   - BDA 완료 → MISS 시 재발사 판단
 
 ### 1.4 시뮬레이션 엔진 + 선형 킬체인
-- [ ] `core/sim-engine.js`: SimEngine requestAnimationFrame 루프
-- [ ] step(dt) 7단계:
+- [x] `core/sim-engine.js`: SimEngine requestAnimationFrame 루프
+- [x] step(dt) 7단계:
   1. 위협 이동 (ballisticTrajectory, RCS 단계별 변화)
   2. 센서 3단계 갱신 (GREEN_PINE SNR 탐지 + LSAM_MFR 교전급 확립)
   3. 선형 킬체인: GREEN_PINE→KAMD(16s+처리)→ICC(16s+처리)→ECS(1s+처리)
@@ -73,33 +73,33 @@
   5. 요격미사일 PNG 유도 비행
   6. BDA 판정
   7. 이벤트 로그 기록
-- [ ] 이벤트 버스: EventEmitter (sensor-state-change, killchain-step, engagement-fired, bda-result)
-- [ ] 상태 머신: READY → RUNNING → PAUSED → COMPLETE
-- [ ] `core/comms.js`: CommChannel — 링크 지연 16s/1s 적용
-- [ ] `core/event-log.js`: 이벤트 로그 (센서/킬체인/교전/BDA 이벤트)
+- [x] 이벤트 버스: EventEmitter (sensor-state-change, killchain-step, engagement-fired, bda-result)
+- [x] 상태 머신: READY → RUNNING → PAUSED → COMPLETE
+- [x] `core/comms.js`: CommChannel — 링크 지연 16s/1s 적용
+- [x] `core/event-log.js`: 이벤트 로그 (센서/킬체인/교전/BDA 이벤트)
 
 ### 1.5 3D 시각화 (선형 C2 탄도탄 대응)
-- [ ] `viz/cesium-app.js`: Viewer 초기화, 한반도 중부 카메라
-- [ ] `viz/radar-viz.js`: GREEN_PINE 볼륨(900km, 호버 표시) + LSAM_MFR 볼륨(310km)
+- [x] `viz/cesium-app.js`: Viewer 초기화, 한반도 중부 카메라
+- [x] `viz/radar-viz.js`: GREEN_PINE 볼륨(900km, 호버 표시) + LSAM_MFR 볼륨(310km)
   - 센서 3단계 색상: 미탐지 투명, 탐지 노랑, 추적 주황, 교전급 녹색
-- [ ] `viz/network-viz.js`: C2 노드 아이콘 + 데이터링크 (킬체인 진행 시 활성화 애니메이션)
-- [ ] `viz/engagement-viz.js`: SRBM 포물선 궤적 + 요격미사일 궤적 + 폭발
+- [x] `viz/network-viz.js`: C2 노드 아이콘 + 데이터링크 (킬체인 진행 시 활성화 애니메이션)
+- [x] `viz/engagement-viz.js`: SRBM 포물선 궤적 + 요격미사일 궤적 + 폭발
   - BDA 대기 표시: 발사 후 BDA 지연 동안 '판정 대기' 상태
-- [ ] `viz/hud.js`:
+- [x] `viz/hud.js`:
   - 킬체인 진행 상태 (GREEN_PINE 탐지→KAMD 분석→ICC 명령→ECS 발사→BDA)
   - 포대 상태 (L-SAM 탄약 잔여, 동시교전 현황)
   - 교전 결과 로그 (PSSEK Pk값 표시)
 
 ### 1.6 통합 + 데모
-- [ ] index.html 전체 배치:
+- [x] index.html 전체 배치:
   - GREEN_PINE_B (후방, 조기경보)
   - KAMD_OPS (오산)
   - ICC (전방 대대)
   - ECS + LSAM_MFR + L-SAM 포대 (전방)
   - SRBM 발사원점 (북방)
-- [ ] 시나리오: SRBM 1발 → GREEN_PINE 탐지(SNR 기반) → 선형 킬체인(84~137s) → L-SAM ABM탄(Mach 9) 선제 발사 → PNG 유도 → PSSEK 판정(접근각별 Pk) → BDA
-- [ ] 버튼: "위협 발사", "초기화", 재생속도
-- [ ] Phase 1 스모크 테스트
+- [x] 시나리오: SRBM 1발 → GREEN_PINE 탐지(SNR 기반) → 선형 킬체인(84~137s) → L-SAM ABM탄(Mach 9) 선제 발사 → PNG 유도 → PSSEK 판정(접근각별 Pk) → BDA
+- [x] 버튼: "위협 발사", "초기화", 재생속도
+- [x] Phase 1 스모크 테스트 (200개 테스트 전체 통과)
 
 ---
 
