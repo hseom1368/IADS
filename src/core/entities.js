@@ -250,6 +250,7 @@ export class ThreatEntity extends BaseEntity {
     this.state = 'flying';    // flying | detected | engaging | intercepted | leaked | destroyed
     this.progress = 0;        // 비행 진행률 (0~1)
     this.identifiedAs = null; // 식별된 위협 타입 (오인식 가능)
+    this.prevPosition = { ...startPos }; // 이전 위치 (연속 충돌 감지용)
   }
 
   /**
@@ -260,6 +261,7 @@ export class ThreatEntity extends BaseEntity {
    */
   updateFlight(newProgress, trajectory, baseRCS) {
     this.progress = newProgress;
+    this.prevPosition = { ...this.position };
     this.position = { ...trajectory.position };
     this.flightPhase = trajectory.phase;
     // RCS: 비행 단계에 따라 baseRCS × rcsMultiplier

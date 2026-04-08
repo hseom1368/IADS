@@ -12,6 +12,7 @@ import {
   predictInterceptPoint,
   calculateLaunchTime,
   closestApproachOnSegment,
+  closestApproachDistance,
   DEG2RAD,
   EARTH_RADIUS_KM,
 } from '../src/core/physics.js';
@@ -389,5 +390,63 @@ describe('closestApproachOnSegment', () => {
     const target = { lon: 127.0, lat: 37.0, alt: 50050 }; // 50m 위
     const dist = closestApproachOnSegment(prev, cur, target);
     expectClose(dist, 0.05, 5); // 50m = 0.05km
+  });
+});
+
+// ════════════════════════════════════════════════════════════
+// 8. closestApproachDistance — Segment-to-Segment 충돌 감지
+// ════════════════════════════════════════════════════════════
+describe('closestApproachDistance (segment-to-segment)', () => {
+  it('두 물체 동일 위치 → 0 km', () => {
+    const pos = { lon: 127.0, lat: 37.0, alt: 50000 };
+    expect(closestApproachDistance(pos, pos, pos, pos)).toBeCloseTo(0, 1);
+  });
+
+  it('정면 충돌: 두 선분이 교차 → 0에 근접', () => {
+    // 미사일: 북→남, 위협: 남→북 (같은 경도, 서로 향해 이동)
+    const prevA = { lon: 127.0, lat: 37.0, alt: 50000 };
+    const curA  = { lon: 127.0, lat: 37.2, alt: 50000 };
+    const prevB = { lon: 127.0, lat: 37.2, alt: 50000 };
+    const curB  = { lon: 127.0, lat: 37.0, alt: 50000 };
+    const dist = closestApproachDistance(prevA, curA, prevB, curB);
+    expect(dist).toBeLessThan(0.1); // 100m 이내
+  });
+
+  it('평행 이동: 두 물체가 500m 간격으로 나란히 이동', () => {
+    const prevA = { lon: 127.0, lat: 37.0, alt: 50000 };
+    const curA  = { lon: 127.0, lat: 37.1, alt: 50000 };
+    const prevB = { lon: 127.005, lat: 37.0, alt: 50000 }; // ~450m 동쪽
+    const curB  = { lon: 127.005, lat: 37.1, alt: 50000 };
+    const dist = closestApproachDistance(prevA, curA, prevB, curB);
+    expectClose(dist, 0.45, 10); // ~450m = ~0.45km
+  });
+
+  it('미사일 고속 통과 + 위협 이동: 최근접점 감지', () => {
+    // 미사일: 남→북 3km 이동, 위협: 북→남 2km 이동 (약간 동쪽 오프셋)
+    const prevA = { lon: 127.0, lat: 37.0, alt: 50000 };
+    const curA  = { lon: 127.0, lat: 37.027, alt: 50000 }; // ~3km 북
+    const prevB = { lon: 127.0003, lat: 37.018, alt: 50000 }; // 약 30m 동쪽
+    const curB  = { lon: 127.0003, lat: 37.0, alt: 50000 }; // 남쪽으로 이동
+    const dist = closestApproachDistance(prevA, curA, prevB, curB);
+    // 교차 지점 근처에서 약 30m 간격
+    expect(dist).toBeLessThan(0.1); // 100m 이내
+  });
+
+  it('두 물체가 멀리 떨어져 있음 → 큰 거리', () => {
+    const prevA = { lon: 127.0, lat: 37.0, alt: 50000 };
+    const curA  = { lon: 127.0, lat: 37.01, alt: 50000 };
+    const prevB = { lon: 128.0, lat: 38.0, alt: 50000 }; // ~140km 떨어짐
+    const curB  = { lon: 128.0, lat: 38.01, alt: 50000 };
+    const dist = closestApproachDistance(prevA, curA, prevB, curB);
+    expect(dist).toBeGreaterThan(100); // 100km 이상
+  });
+
+  it('closestApproachOnSegment 래퍼: 기존 호환', () => {
+    const prev = { lon: 127.0, lat: 37.0, alt: 50000 };
+    const cur = { lon: 127.0, lat: 37.1, alt: 50000 };
+    const target = { lon: 127.0, lat: 37.05, alt: 50000 };
+    const distWrapper = closestApproachOnSegment(prev, cur, target);
+    const distDirect = closestApproachDistance(prev, cur, target, target);
+    expect(distWrapper).toBeCloseTo(distDirect, 5);
   });
 });

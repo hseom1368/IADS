@@ -9,7 +9,7 @@
  *
  * 발사 후: PNG 비행 → kill_radius 도달 → Pk 판정
  */
-import { slantRange, predictInterceptPoint, calculateLaunchTime, closestApproachOnSegment } from './physics.js';
+import { slantRange, predictInterceptPoint, calculateLaunchTime, closestApproachDistance } from './physics.js';
 import { SENSOR_STATE } from './entities.js';
 import { getAspectAngle } from './sensor-model.js';
 
@@ -173,9 +173,14 @@ export function evaluateEngagement(threat, battery, mfrSensor, registry, simTime
  * @returns {{ hit: boolean, distance: number }|null} null이면 아직 도달 안 함
  */
 export function checkInterceptResult(interceptor, threat, randomFn = Math.random) {
-  // 연속 충돌 감지: prevPosition→position 선분 위 최근접점
-  const closestKm = closestApproachOnSegment(
-    interceptor.prevPosition, interceptor.position, threat.position
+  // 연속 충돌 감지: 미사일 선분 × 위협 선분 사이 최소 거리
+  // (양쪽 모두 이동하므로 segment-to-segment)
+  const prevI = interceptor.prevPosition || interceptor.position;
+  const prevT = threat.prevPosition || threat.position;
+
+  const closestKm = closestApproachDistance(
+    prevI, interceptor.position,
+    prevT, threat.position
   );
   const closestM = closestKm * 1000;
 

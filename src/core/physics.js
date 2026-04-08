@@ -274,55 +274,97 @@ export function calculateLaunchTime(shooterPos, pipPosition, timeToReachPip, mis
 }
 
 /**
- * 선분(prevPos→curPos) 위에서 targetPos까지의 최소 거리 계산
- * (연속 충돌 감지 — 고속 물체가 kill radius를 건너뛰는 문제 해결)
+ * 두 선분(A: prevA→curA, B: prevB→curB) 사이의 최소 거리 계산
+ * (연속 충돌 감지 — 고속 물체 2개가 서로 지나치는 문제 해결)
  *
- * @param {{ lon: number, lat: number, alt: number }} prevPos - 이전 위치
- * @param {{ lon: number, lat: number, alt: number }} curPos - 현재 위치
- * @param {{ lon: number, lat: number, alt: number }} targetPos - 표적 위치
+ * 미사일과 위협 모두 이동하므로 양쪽을 선분으로 취급.
+ * Phase 2+ 에서 기동 위협(순항미사일 ±5G 등)에도 정확.
+ *
+ * @param {{ lon: number, lat: number, alt: number }} prevA - 물체 A 이전 위치
+ * @param {{ lon: number, lat: number, alt: number }} curA - 물체 A 현재 위치
+ * @param {{ lon: number, lat: number, alt: number }} prevB - 물체 B 이전 위치
+ * @param {{ lon: number, lat: number, alt: number }} curB - 물체 B 현재 위치
+ * @returns {number} 최소 거리 (km)
+ */
+export function closestApproachDistance(prevA, curA, prevB, curB) {
+  // WGS84 → 로컬 미터 근사 (prevA 기준)
+  const cosLat = Math.cos(prevA.lat * DEG2RAD);
+  const R = EARTH_RADIUS_KM * 1000;
+  const mPerDegLon = DEG2RAD * cosLat * R;
+  const mPerDegLat = DEG2RAD * R;
+
+  function toENU(pos) {
+    return {
+      x: (pos.lon - prevA.lon) * mPerDegLon,
+      y: (pos.lat - prevA.lat) * mPerDegLat,
+      z: pos.alt - prevA.alt,
+    };
+  }
+
+  const a0 = { x: 0, y: 0, z: 0 }; // prevA in ENU
+  const a1 = toENU(curA);
+  const b0 = toENU(prevB);
+  const b1 = toENU(curB);
+
+  // 방향 벡터
+  const dA = { x: a1.x - a0.x, y: a1.y - a0.y, z: a1.z - a0.z };
+  const dB = { x: b1.x - b0.x, y: b1.y - b0.y, z: b1.z - b0.z };
+  const w0 = { x: a0.x - b0.x, y: a0.y - b0.y, z: a0.z - b0.z };
+
+  const dot = (u, v) => u.x * v.x + u.y * v.y + u.z * v.z;
+
+  const a = dot(dA, dA);
+  const b = dot(dA, dB);
+  const c = dot(dB, dB);
+  const d = dot(dA, w0);
+  const e = dot(dB, w0);
+
+  const denom = a * c - b * b;
+  let s, t;
+
+  if (denom < 1e-10) {
+    // 평행 선분
+    s = 0;
+    t = c > 1e-10 ? e / c : 0;
+  } else {
+    s = (b * e - c * d) / denom;
+    t = (a * e - b * d) / denom;
+  }
+
+  // [0,1] 클램핑 + 재최적화
+  s = Math.max(0, Math.min(1, s));
+  // s 클램핑 후 최적 t 재계산
+  if (c > 1e-10) {
+    t = (b * s + e) / c;
+    t = Math.max(0, Math.min(1, t));
+  } else {
+    t = 0;
+  }
+  // t 클램핑 후 최적 s 재계산
+  if (a > 1e-10) {
+    s = (b * t - d) / a;
+    s = Math.max(0, Math.min(1, s));
+  }
+
+  // 최근접점 차이 벡터
+  const closest = {
+    x: (a0.x + dA.x * s) - (b0.x + dB.x * t),
+    y: (a0.y + dA.y * s) - (b0.y + dB.y * t),
+    z: (a0.z + dA.z * s) - (b0.z + dB.z * t),
+  };
+
+  return Math.sqrt(closest.x ** 2 + closest.y ** 2 + closest.z ** 2) / 1000; // km
+}
+
+/**
+ * 하위 호환: 단일 점(정지 표적) 대상 segment-to-point 래퍼
+ * @param {{ lon: number, lat: number, alt: number }} prevPos
+ * @param {{ lon: number, lat: number, alt: number }} curPos
+ * @param {{ lon: number, lat: number, alt: number }} targetPos
  * @returns {number} 최소 거리 (km)
  */
 export function closestApproachOnSegment(prevPos, curPos, targetPos) {
-  // WGS84 → 로컬 미터 근사 (prevPos 기준)
-  const cosLat = Math.cos(prevPos.lat * DEG2RAD);
-  const mPerDegLon = EARTH_RADIUS_KM * 1000 * DEG2RAD * cosLat;
-  const mPerDegLat = EARTH_RADIUS_KM * 1000 * DEG2RAD;
-
-  // 선분 A→B, 점 P
-  const ax = (prevPos.lon - prevPos.lon) * mPerDegLon; // 0
-  const ay = (prevPos.lat - prevPos.lat) * mPerDegLat; // 0
-  const az = prevPos.alt - prevPos.alt;                 // 0
-
-  const bx = (curPos.lon - prevPos.lon) * mPerDegLon;
-  const by = (curPos.lat - prevPos.lat) * mPerDegLat;
-  const bz = curPos.alt - prevPos.alt;
-
-  const px = (targetPos.lon - prevPos.lon) * mPerDegLon;
-  const py = (targetPos.lat - prevPos.lat) * mPerDegLat;
-  const pz = targetPos.alt - prevPos.alt;
-
-  // 선분 A→B 위 최근접점: t = dot(AP, AB) / dot(AB, AB), clamped [0,1]
-  const abx = bx, aby = by, abz = bz; // A is origin
-  const abLenSq = abx * abx + aby * aby + abz * abz;
-
-  if (abLenSq < 0.001) {
-    // 이전/현재 위치 동일 → 직접 거리
-    return Math.sqrt(px * px + py * py + pz * pz) / 1000;
-  }
-
-  const t = Math.max(0, Math.min(1, (px * abx + py * aby + pz * abz) / abLenSq));
-
-  // 최근접점 좌표
-  const cx = abx * t;
-  const cy = aby * t;
-  const cz = abz * t;
-
-  // 최근접점 → 표적 거리
-  const dx = px - cx;
-  const dy = py - cy;
-  const dz = pz - cz;
-
-  return Math.sqrt(dx * dx + dy * dy + dz * dz) / 1000; // km
+  return closestApproachDistance(prevPos, curPos, targetPos, targetPos);
 }
 
 // 내부 상수 내보내기 (테스트용)
