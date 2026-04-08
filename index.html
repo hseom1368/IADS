@@ -142,7 +142,8 @@ function createEngine() {
   engine.addC2(new C2Entity('ECS', POS.ECS, currentSkill));
 
   // 포대
-  const bat = new BatteryEntity('LSAM', POS.LSAM_BAT, mfr.id, 'ecs_1', { ABM: 12, AAM: 12 }, 10);
+  const batConfig = registry.getBatteryConfig('LSAM');
+  const bat = new BatteryEntity('LSAM', POS.LSAM_BAT, mfr.id, 'ecs_1', { ABM: 12, AAM: 12 }, 10, batConfig);
   engine.addBattery(bat);
 
   // ── 이벤트 → VIZ 연결 ──────────────────────────────────
