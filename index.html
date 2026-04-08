@@ -106,7 +106,12 @@ const POS = {
   ICC:        { lon: 127.05, lat: 37.05, alt: 100 },   // 전방 대대
   ECS:        { lon: 127.03, lat: 37.08, alt: 100 },   // 포대 ECS
   LSAM_MFR:   { lon: 127.04, lat: 37.12, alt: 180 },   // L-SAM MFR (포대 북동 ~1km)
-  LSAM_BAT:   { lon: 127.03, lat: 37.1, alt: 150 },   // L-SAM 발사대
+  LSAM_BAT:   { lon: 127.03, lat: 37.1, alt: 150 },   // L-SAM 포대 중심
+  // 발사대(TEL) 4대 개별 배치 (포대 중심 주변 ~200m 간격)
+  TEL_ABM1:   { lon: 127.028, lat: 37.099, alt: 150 },  // ABM 발사대 1
+  TEL_ABM2:   { lon: 127.032, lat: 37.099, alt: 150 },  // ABM 발사대 2
+  TEL_AAM1:   { lon: 127.028, lat: 37.101, alt: 150 },  // AAM 발사대 1
+  TEL_AAM2:   { lon: 127.032, lat: 37.101, alt: 150 },  // AAM 발사대 2
   SRBM_ORIGIN: { lon: 127.0, lat: 39.5, alt: 0 },     // 북방 발사원점
   SRBM_TARGET: { lon: 127.03, lat: 37.0, alt: 0 },    // 수도권 표적
 };
@@ -217,24 +222,30 @@ function setupViz() {
   radarViz.addRadar('gp', POS.GREEN_PINE, 900, '#44cc44');
   radarViz.addRadar('mfr', POS.LSAM_MFR, 310, '#00aaff');
 
-  // C2 네트워크 노드 (MFR과 발사대 분리)
+  // C2 네트워크 노드 (MFR + ECS + TEL 4대 개별 표시)
   networkViz.addNode('GREEN_PINE_B', 'GREEN_PINE_B', 'GREEN PINE', POS.GREEN_PINE);
   networkViz.addNode('KAMD_OPS', 'KAMD_OPS', 'KAMD OPS', POS.KAMD_OPS);
   networkViz.addNode('ICC', 'ICC', 'ICC', POS.ICC);
   networkViz.addNode('ECS', 'ECS', 'ECS', POS.ECS);
   networkViz.addNode('LSAM_MFR', 'LSAM_MFR', 'L-SAM MFR', POS.LSAM_MFR);
-  networkViz.addNode('LSAM', 'LSAM', 'L-SAM', POS.LSAM_BAT);
+  networkViz.addNode('TEL_ABM1', 'LSAM', 'ABM-1 (6)', POS.TEL_ABM1);
+  networkViz.addNode('TEL_ABM2', 'LSAM', 'ABM-2 (6)', POS.TEL_ABM2);
+  networkViz.addNode('TEL_AAM1', 'LSAM', 'AAM-1 (6)', POS.TEL_AAM1);
+  networkViz.addNode('TEL_AAM2', 'LSAM', 'AAM-2 (6)', POS.TEL_AAM2);
 
-  // 데이터링크 (MFR↔ECS internal 0.5s 포함)
+  // 데이터링크 (MFR↔ECS + ECS→TEL 4대)
   networkViz.addLink('GREEN_PINE_B', 'KAMD_OPS', POS.GREEN_PINE, POS.KAMD_OPS, 'longRange');
   networkViz.addLink('KAMD_OPS', 'ICC', POS.KAMD_OPS, POS.ICC, 'longRange');
   networkViz.addLink('ICC', 'ECS', POS.ICC, POS.ECS, 'shortRange');
   networkViz.addLink('LSAM_MFR', 'ECS', POS.LSAM_MFR, POS.ECS, 'internal');
-  networkViz.addLink('ECS', 'LSAM', POS.ECS, POS.LSAM_BAT, 'shortRange');
+  networkViz.addLink('ECS', 'TEL_ABM1', POS.ECS, POS.TEL_ABM1, 'shortRange');
+  networkViz.addLink('ECS', 'TEL_ABM2', POS.ECS, POS.TEL_ABM2, 'shortRange');
+  networkViz.addLink('ECS', 'TEL_AAM1', POS.ECS, POS.TEL_AAM1, 'shortRange');
+  networkViz.addLink('ECS', 'TEL_AAM2', POS.ECS, POS.TEL_AAM2, 'shortRange');
 
   hud.addLog('System initialized');
   hud.addLog('GREEN_PINE: 900km L-band EWR');
-  hud.addLog('L-SAM: ABM 12 / AAM 12 ready');
+  hud.addLog('L-SAM: TEL×4 (ABM×2×6 + AAM×2×6)');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -269,7 +280,7 @@ function loop(timestamp) {
     hud.updateThreats(active, engine.threats.length);
     if (bat) {
       hud.updateBattery({
-        abm: bat.getAmmo('ABM'), aam: bat.getAmmo('AAM'),
+        launchers: bat.launchers,
         active: bat.activeEngagements, max: bat.maxSimultaneous,
         hits, leaks,
       });

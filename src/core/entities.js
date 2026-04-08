@@ -357,6 +357,7 @@ export class InterceptorEntity extends BaseEntity {
     this.state = 'boosting';    // boosting | guiding | detonated | missed
     this.boostTime = 2.0;       // 부스터 시간 (s)
     this.elapsedTime = 0;       // 경과 시간 (s)
+    this.flyoutTime = null;     // 예상 비행시간 (s) — 경과 시 PSSEK 판정
     this.batteryId = null;      // 발사 포대 ID
   }
 

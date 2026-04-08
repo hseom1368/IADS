@@ -33,10 +33,9 @@ export class HUD {
         <div id="hud-killchain" style="font-size:8px;color:rgba(0,255,136,0.6);line-height:1.8"></div>
       </div>
       <div class="hbox">
-        <h3>&#x25B8; L-SAM BATTERY</h3>
-        <div class="row"><span class="lbl">ABM 탄약</span><span class="gn" id="hud-abm">12</span></div>
-        <div class="row"><span class="lbl">AAM 탄약</span><span class="gn" id="hud-aam">12</span></div>
-        <div class="row"><span class="lbl">동시교전</span><span class="bl" id="hud-engage">0 / 10</span></div>
+        <h3>&#x25B8; L-SAM BATTERY (TEL&#xD7;4)</h3>
+        <div id="hud-tel" style="font-size:8px;line-height:1.6;color:rgba(0,255,136,0.6)"></div>
+        <div class="row" style="margin-top:4px;padding-top:4px;border-top:1px solid rgba(0,255,136,0.12)"><span class="lbl">동시교전</span><span class="bl" id="hud-engage">0 / 10</span></div>
         <div class="row"><span class="lbl">격추/관통</span>
           <span><span class="gn" id="hud-hit">0</span><span style="color:rgba(255,255,255,0.25)"> / </span><span class="rd" id="hud-leak">0</span></span>
         </div>
@@ -83,20 +82,22 @@ export class HUD {
    */
   updateBattery(data) {
     const el = (id) => document.getElementById(id);
-    const abmEl = el('hud-abm');
-    const aamEl = el('hud-aam');
     const engEl = el('hud-engage');
     const hitEl = el('hud-hit');
     const leakEl = el('hud-leak');
+    const telEl = el('hud-tel');
 
-    if (abmEl) {
-      abmEl.textContent = data.abm;
-      abmEl.className = data.abm <= 2 ? 'rd' : data.abm <= 6 ? 'yl' : 'gn';
+    // TEL별 탄약 표시
+    if (telEl && data.launchers) {
+      telEl.innerHTML = data.launchers.map(l => {
+        const pips = Array(l.capacity).fill(0).map((_, i) =>
+          `<span style="display:inline-block;width:6px;height:6px;margin:0 1px;border-radius:1px;background:${i < l.remaining ? '#00ff88' : 'rgba(0,255,136,0.1)'};border:1px solid rgba(0,255,136,0.2)"></span>`
+        ).join('');
+        const color = l.remaining === 0 ? '#ff4444' : l.remaining <= 2 ? '#ffcc00' : '#00ff88';
+        return `<div style="margin-bottom:2px"><span style="color:rgba(0,255,136,0.5);width:50px;display:inline-block">${l.missileType}-${l.id.slice(-1)}</span>${pips} <span style="color:${color}">${l.remaining}/${l.capacity}</span></div>`;
+      }).join('');
     }
-    if (aamEl) {
-      aamEl.textContent = data.aam;
-      aamEl.className = data.aam <= 2 ? 'rd' : data.aam <= 6 ? 'yl' : 'gn';
-    }
+
     if (engEl) engEl.textContent = `${data.active} / ${data.max}`;
     if (hitEl) hitEl.textContent = data.hits;
     if (leakEl) leakEl.textContent = data.leaks;

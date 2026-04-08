@@ -372,7 +372,7 @@ describe('SimEngine step integration', () => {
     engine.timeScale = 4;
     engine.start();
     engine.step(1);
-    expect(engine.simTime).toBe(4); // 1초 × 4배속
+    expect(engine.simTime).toBeCloseTo(4, 5); // 1초 × 4배속 (서브스텝 부동소수점)
   });
 });
 
