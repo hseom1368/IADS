@@ -264,12 +264,24 @@ export class SimEngine {
 
       // 지면 도달 → 관통 판정 전에 활성 요격미사일 판정 먼저 실행
       if (threat.progress >= 1 && threat.state !== 'intercepted') {
-        // 이 위협을 향한 활성 요격미사일이 있으면 즉시 판정
+        // 이 위협을 향한 활성 요격미사일 중 flyout 경과한 것만 판정
         for (const intc of this.interceptors) {
           if (intc.state === 'detonated' || intc.state === 'missed') continue;
           if (intc.targetThreatId !== threat.id) continue;
 
-          // 발사 시점에 미리 결정된 결과 적용
+          // flyout 미경과 미사일은 PIP에 아직 도달 안 함 → 판정 불가
+          if (intc.flyoutTime && intc.elapsedTime < intc.flyoutTime) {
+            // 미사일이 PIP에 도달하기 전에 위협이 착탄 → 요격 실패
+            intc.state = 'missed';
+            this.eventLog.log(EVENT_TYPE.INTERCEPT_MISS, this.simTime, threat.id, {
+              interceptorId: intc.id, pk: intc.pssekPk, reason: 'threat_impacted_before_flyout',
+            });
+            this.emit('bda-result', { threat, interceptor: intc, hit: false });
+            this.emit('interceptor-selfdestructed', { interceptor: intc, reason: 'too_late' });
+            continue;
+          }
+
+          // flyout 경과한 미사일 → 발사 시점에 결정된 결과 적용
           if (intc.predeterminedHit) {
             intc.state = 'detonated';
             threat.state = 'intercepted';
