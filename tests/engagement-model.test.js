@@ -101,7 +101,7 @@ describe('evaluateEngagement', () => {
   it('STEP 5: 탄약 소진 → WAIT', () => {
     const threat = makeSRBM();
     const battery = makeBattery();
-    battery.ammo.ABM = 0;
+    for (const l of battery.launchers) { if (l.missileType === 'ABM') l.remaining = 0; }
     const sensor = makeMFR(threat.id);
 
     const result = evaluateEngagement(threat, battery, sensor, registry, 200);

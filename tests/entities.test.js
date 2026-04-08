@@ -129,14 +129,19 @@ describe('C2Entity', () => {
 // ════════════════════════════════════════════════════════════
 describe('BatteryEntity', () => {
   let bat;
+  const LSAM_BATTERY_CONFIG = {
+    launchers: { ABM: 2, AAM: 2 },
+    roundsPerLauncher: 6,
+  };
   beforeEach(() => {
-    bat = new BatteryEntity('LSAM', POS, 'mfr_1', 'ecs_1', { ABM: 12, AAM: 12 }, 10);
+    bat = new BatteryEntity('LSAM', POS, 'mfr_1', 'ecs_1', { ABM: 12, AAM: 12 }, 10, LSAM_BATTERY_CONFIG);
   });
 
-  it('초기 상태', () => {
+  it('초기 상태: 4개 발사대 (ABM×2 + AAM×2)', () => {
     expect(bat.shooterTypeId).toBe('LSAM');
-    expect(bat.ammo.ABM).toBe(12);
-    expect(bat.ammo.AAM).toBe(12);
+    expect(bat.launchers).toHaveLength(4);
+    expect(bat.getAmmo('ABM')).toBe(12); // 2대 × 6발
+    expect(bat.getAmmo('AAM')).toBe(12); // 2대 × 6발
     expect(bat.activeEngagements).toBe(0);
     expect(bat.maxSimultaneous).toBe(10);
   });
@@ -145,14 +150,17 @@ describe('BatteryEntity', () => {
     expect(bat.canFire('ABM')).toBe(true);
   });
 
-  it('fire: 탄약 차감 + 교전 수 증가', () => {
-    bat.fire('ABM');
-    expect(bat.ammo.ABM).toBe(11);
+  it('fire: 발사대 탄약 차감 + 교전 수 증가 + launcherId 반환', () => {
+    const result = bat.fire('ABM');
+    expect(result).toBeTruthy();
+    expect(result.launcherId).toBeDefined();
+    expect(bat.getAmmo('ABM')).toBe(11);
     expect(bat.activeEngagements).toBe(1);
   });
 
   it('canFire: 탄약 소진 → false', () => {
-    bat.ammo.ABM = 0;
+    // 모든 ABM 발사대 탄약 소진
+    for (const l of bat.launchers.filter(l => l.missileType === 'ABM')) l.remaining = 0;
     expect(bat.canFire('ABM')).toBe(false);
   });
 
@@ -201,13 +209,36 @@ describe('BatteryEntity', () => {
     expect(bat.bdaPending.size).toBe(1); // int_1 완료, int_2 잔여
   });
 
-  it('연속 발사: 12발 모두 발사', () => {
+  it('연속 발사: 12발 모두 발사 (발사대별 차감)', () => {
     for (let i = 0; i < 12; i++) {
-      expect(bat.fire('ABM')).toBe(true);
-      bat.completeEngagement(); // 동시교전 상한 해제
+      expect(bat.fire('ABM')).toBeTruthy();
+      bat.completeEngagement();
     }
-    expect(bat.ammo.ABM).toBe(0);
+    expect(bat.getAmmo('ABM')).toBe(0);
     expect(bat.fire('ABM')).toBe(false);
+  });
+
+  it('selectLauncher: 가용 발사대 선택', () => {
+    const l = bat.selectLauncher('ABM');
+    expect(l).not.toBeNull();
+    expect(l.missileType).toBe('ABM');
+    expect(l.remaining).toBeGreaterThan(0);
+  });
+
+  it('selectLauncher: 첫 발사대 소진 → 다음 발사대 자동 선택', () => {
+    const first = bat.selectLauncher('ABM');
+    // 첫 발사대 탄약 소진
+    first.remaining = 0;
+    const second = bat.selectLauncher('ABM');
+    expect(second).not.toBeNull();
+    expect(second.id).not.toBe(first.id);
+  });
+
+  it('getAmmo: 발사대별 탄약 합산', () => {
+    expect(bat.getAmmo('ABM')).toBe(12);
+    expect(bat.getAmmo('AAM')).toBe(12);
+    bat.fire('ABM');
+    expect(bat.getAmmo('ABM')).toBe(11);
   });
 });
 

@@ -198,9 +198,9 @@ describe('Phase 1 E2E: SRBM → GREEN_PINE → Killchain → L-SAM → BDA', () 
     const fired = engine.eventLog.getByType(EVENT_TYPE.ENGAGEMENT_FIRED);
     if (fired.length > 0) {
       const bat = engine.batteries[0];
-      expect(bat.ammo.ABM).toBeLessThan(12);
+      expect(bat.getAmmo('ABM')).toBeLessThan(12);
       // ABM탄 발사, AAM은 미사용
-      expect(bat.ammo.AAM).toBe(12);
+      expect(bat.getAmmo('AAM')).toBe(12);
     }
   });
 

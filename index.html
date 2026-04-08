@@ -269,7 +269,7 @@ function loop(timestamp) {
     hud.updateThreats(active, engine.threats.length);
     if (bat) {
       hud.updateBattery({
-        abm: bat.ammo.ABM, aam: bat.ammo.AAM,
+        abm: bat.getAmmo('ABM'), aam: bat.getAmmo('AAM'),
         active: bat.activeEngagements, max: bat.maxSimultaneous,
         hits, leaks,
       });

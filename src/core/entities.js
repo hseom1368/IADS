@@ -151,21 +151,79 @@ export class BatteryEntity extends BaseEntity {
    * @param {{ lon: number, lat: number, alt: number }} position
    * @param {string} mfrSensorId - 소속 MFR 센서 엔티티 ID
    * @param {string} ecsC2Id - 소속 ECS C2 엔티티 ID
-   * @param {{ ABM?: number, AAM?: number }} totalRounds - 초기 탄약
+   * @param {{ ABM?: number, AAM?: number }} totalRounds - 초기 탄약 (하위 호환)
    * @param {number} maxSimultaneous - 동시교전 상한
+   * @param {object} [batteryConfig] - weapon-data의 battery 구성 (launchers 정보)
    */
-  constructor(shooterTypeId, position, mfrSensorId, ecsC2Id, totalRounds, maxSimultaneous) {
+  constructor(shooterTypeId, position, mfrSensorId, ecsC2Id, totalRounds, maxSimultaneous, batteryConfig) {
     super(shooterTypeId, position);
     this.shooterTypeId = shooterTypeId;
     this.mfrSensorId = mfrSensorId;
     this.ecsC2Id = ecsC2Id;
-    this.ammo = { ...totalRounds };
     this.activeEngagements = 0;
     this.maxSimultaneous = maxSimultaneous;
+
+    // 발사대(TEL) 개별 모델링
+    if (batteryConfig && batteryConfig.launchers) {
+      this.launchers = [];
+      let launcherIdx = 0;
+      for (const [missileType, count] of Object.entries(batteryConfig.launchers)) {
+        for (let i = 0; i < count; i++) {
+          this.launchers.push({
+            id: `${this.id}_TEL${++launcherIdx}`,
+            missileType,
+            capacity: batteryConfig.roundsPerLauncher,
+            remaining: batteryConfig.roundsPerLauncher,
+          });
+        }
+      }
+    } else {
+      // 하위 호환: totalRounds 기반 단일 가상 발사대
+      this.launchers = [];
+      for (const [missileType, total] of Object.entries(totalRounds)) {
+        this.launchers.push({
+          id: `${this.id}_TEL_${missileType}`,
+          missileType,
+          capacity: total,
+          remaining: total,
+        });
+      }
+    }
+
+    // 하위 호환: ammo 집계 getter
+    this.ammo = new Proxy({}, {
+      get: (_, prop) => {
+        if (prop === Symbol.toPrimitive || typeof prop === 'symbol') return undefined;
+        return this.launchers
+          .filter(l => l.missileType === prop)
+          .reduce((sum, l) => sum + l.remaining, 0);
+      },
+    });
+
     /** @type {Array<{ missileType: string, threatId: string, scheduledAt: number }>} */
     this.launchQueue = [];
     /** @type {Map<string, { timer: number, threatId: string }>} */
     this.bdaPending = new Map();
+  }
+
+  /**
+   * 특정 미사일 타입의 잔여 탄약 합계
+   * @param {string} missileType
+   * @returns {number}
+   */
+  getAmmo(missileType) {
+    return this.launchers
+      .filter(l => l.missileType === missileType)
+      .reduce((sum, l) => sum + l.remaining, 0);
+  }
+
+  /**
+   * 발사 가능한 발사대 선택
+   * @param {string} missileType
+   * @returns {{ id: string, missileType: string, capacity: number, remaining: number }|null}
+   */
+  selectLauncher(missileType) {
+    return this.launchers.find(l => l.missileType === missileType && l.remaining > 0) || null;
   }
 
   /**
@@ -176,20 +234,21 @@ export class BatteryEntity extends BaseEntity {
   canFire(missileType) {
     if (!this.operational) return false;
     if (this.activeEngagements >= this.maxSimultaneous) return false;
-    if ((this.ammo[missileType] ?? 0) <= 0) return false;
+    if (!this.selectLauncher(missileType)) return false;
     return true;
   }
 
   /**
-   * 미사일 발사 (탄약 차감, 교전 수 증가)
+   * 미사일 발사 (발사대 탄약 차감 + 교전 수 증가)
    * @param {string} missileType
-   * @returns {boolean}
+   * @returns {{ launcherId: string }|false}
    */
   fire(missileType) {
     if (!this.canFire(missileType)) return false;
-    this.ammo[missileType]--;
+    const launcher = this.selectLauncher(missileType);
+    launcher.remaining--;
     this.activeEngagements++;
-    return true;
+    return { launcherId: launcher.id };
   }
 
   /**

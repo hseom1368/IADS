@@ -164,8 +164,10 @@ export class SimEngine {
     for (const s of this.sensors) s.trackStates.clear();
     for (const c of this.c2s) { c.processingQueue = []; c.engagementPlan = []; }
     for (const b of this.batteries) {
-      const config = this.registry.getBatteryConfig(b.shooterTypeId);
-      if (config) b.ammo = { ...config.totalRounds };
+      // 발사대별 탄약 복원
+      for (const launcher of b.launchers) {
+        launcher.remaining = launcher.capacity;
+      }
       b.activeEngagements = 0;
       b.launchQueue = [];
       b.bdaPending.clear();
@@ -459,7 +461,8 @@ export class SimEngine {
 
       if (result.result === ENGAGEMENT_RESULT.FIRE) {
         // 발사!
-        if (battery.fire(result.missileType)) {
+        const fireResult = battery.fire(result.missileType);
+        if (fireResult) {
           threat.state = 'engaging';
 
           const intc = new InterceptorEntity(
