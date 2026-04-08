@@ -533,24 +533,11 @@ export class SimEngine {
           const flyout = result.launchInfo ? result.launchInfo.flyoutTime : 30;
           intc.flyoutTime = flyout;
 
-          // hit-to-kill PIP: flyoutTime 후 위협의 예측 위치
-          // 위협 속도 추정 → flyout초 후 위치 산출
-          const threatInfo = this.registry.getThreatInfo(threat.typeId);
-          const totalDistM = slantRange(threat.startPos, threat.targetPos) * 1000;
-          const totalFlightTime = totalDistM / (threatInfo ? threatInfo.baseSpeed : 2040);
-          const futureProgress = Math.min(1, threat.progress + flyout / totalFlightTime);
+          // PIP: evaluateEngagement가 산출한 봉투 내 PIP 사용
+          // (flyout 후 재계산 시 봉투 밖으로 벗어나는 문제 방지)
+          intc.pipPosition = result.pip ? { ...result.pip.position } : { ...threat.position };
 
-          let futureTraj;
-          if (threat.typeId === 'CRUISE_MISSILE') {
-            futureTraj = cruiseTrajectory(threat.startPos, threat.targetPos, 30, threatInfo.baseSpeed, futureProgress);
-          } else if (threat.typeId === 'AIRCRAFT') {
-            futureTraj = aircraftTrajectory(threat.startPos, threat.targetPos, 10000, threatInfo.baseSpeed, futureProgress);
-          } else {
-            futureTraj = ballisticTrajectory(threat.startPos, threat.targetPos, threatInfo.maxAltitude, threatInfo.baseSpeed, futureProgress);
-          }
-          intc.pipPosition = { ...futureTraj.position };
-
-          // 초기 속도: flyout 후 예측 PIP 방향으로 직접 지향
+          // 초기 속도: PIP 방향으로 직접 지향
           const DEG2RAD_L = Math.PI / 180;
           const EARTH_R_L = 6371000;
           const cosLatL = Math.cos(battery.position.lat * DEG2RAD_L);

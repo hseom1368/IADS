@@ -190,8 +190,9 @@ function createEngine() {
       engagementViz.removeInterceptor(interceptor.id);
       hud.addLog(`HIT: ${threat.id} intercepted! (hit-to-kill at PIP)`, '#00ff88');
     } else {
+      engagementViz.explode(interceptor.pipPosition || interceptor.position, true);
       engagementViz.removeInterceptor(interceptor.id);
-      hud.addLog(`MISS: ${threat.id} — leaked`, '#ff4444');
+      hud.addLog(`MISS: ${threat.id} — S-L-S refire?`, '#ff4444');
     }
   });
 
