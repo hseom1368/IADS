@@ -558,8 +558,8 @@ export class SimEngine {
           }
           this.interceptors.push(intc);
 
-          // BDA 등록 (S-L-S)
-          battery.startBDA(intc.id, threat.id, result.bdaDelay);
+          // BDA 등록: flyout 도달 = BDA 시점 (PIP에서 결과 확인)
+          battery.startBDA(intc.id, threat.id, intc.flyoutTime);
 
           this.eventLog.log(EVENT_TYPE.ENGAGEMENT_FIRED, this.simTime, threat.id, {
             batteryId: battery.id, missileType: result.missileType,
