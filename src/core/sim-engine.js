@@ -195,14 +195,15 @@ export class SimEngine {
     for (let sub = 0; sub < numSubsteps; sub++) {
       this.simTime += subDt;
 
+      // 6→1→5 순서: BDA 판정 먼저 (flyout 경과 체크), 그 다음 위협/미사일 이동
+      // 위협이 leaked 되기 직전에 flyout 판정이 먼저 실행되어야 함
+      this._stepBDA(subDt);
+
       // 1. 위협 이동
       this._stepThreats(subDt);
 
       // 5. 요격미사일 유도
       this._stepInterceptors(subDt);
-
-      // 6. BDA 판정 (CCD 필요 — 물리 이동 직후)
-      this._stepBDA(subDt);
     }
 
     // 센서/킬체인/교전 판정은 프레임당 1회 (물리 독립)
@@ -263,11 +264,38 @@ export class SimEngine {
       const phaseRCS = this.registry.getThreatRCS(threat.typeId, trajectory.phase);
       threat.updateFlight(threat.progress, trajectory, phaseRCS);
 
-      // 지면 도달 → 관통 (leaked)
+      // 지면 도달 → 관통 판정 전에 활성 요격미사일 판정 먼저 실행
       if (threat.progress >= 1 && threat.state !== 'intercepted') {
-        threat.state = 'leaked';
-        this.eventLog.log(EVENT_TYPE.THREAT_LEAKED, this.simTime, threat.id, {});
-        this.emit('threat-leaked', { threat });
+        // 이 위협을 향한 활성 요격미사일이 있으면 즉시 판정
+        for (const intc of this.interceptors) {
+          if (intc.state === 'detonated' || intc.state === 'missed') continue;
+          if (intc.targetThreatId !== threat.id) continue;
+
+          // 발사 시점에 미리 결정된 결과 적용
+          if (intc.predeterminedHit) {
+            intc.state = 'detonated';
+            threat.state = 'intercepted';
+            this.eventLog.log(EVENT_TYPE.INTERCEPT_HIT, this.simTime, threat.id, {
+              interceptorId: intc.id, pk: intc.pssekPk,
+            });
+            this.emit('bda-result', { threat, interceptor: intc, hit: true });
+          } else {
+            intc.state = 'missed';
+            this.eventLog.log(EVENT_TYPE.INTERCEPT_MISS, this.simTime, threat.id, {
+              interceptorId: intc.id, pk: intc.pssekPk,
+            });
+            this.emit('bda-result', { threat, interceptor: intc, hit: false });
+            this.emit('interceptor-selfdestructed', { interceptor: intc, reason: 'miss' });
+          }
+          break; // S-L-S: 1발만 판정
+        }
+
+        // intercepted가 아니면 관통
+        if (threat.state !== 'intercepted') {
+          threat.state = 'leaked';
+          this.eventLog.log(EVENT_TYPE.THREAT_LEAKED, this.simTime, threat.id, {});
+          this.emit('threat-leaked', { threat });
+        }
       }
     }
   }
@@ -483,8 +511,12 @@ export class SimEngine {
           );
           intc.batteryId = battery.id;
 
-          // 초기 속도: PIP(또는 위협 현재 위치) 방향으로 직접 지향
-          // 실제 VLS 미사일도 발사 직후 TVC로 목표 방향 전환
+          // EADSIM-Lite 핵심: 발사 시점에 PSSEK로 결과 즉시 결정
+          // 물리 비행(PNG)은 시각화용. 결과는 이미 결정됨.
+          intc.predeterminedHit = Math.random() < result.pk;
+          intc.flyoutTime = result.launchInfo ? result.launchInfo.flyoutTime : 30;
+
+          // 초기 속도: PIP 방향으로 직접 지향
           const DEG2RAD_L = Math.PI / 180;
           const EARTH_R_L = 6371000;
           const cosLatL = Math.cos(battery.position.lat * DEG2RAD_L);
@@ -502,8 +534,6 @@ export class SimEngine {
           } else {
             intc.velocity = { x: 0, y: 0, z: result.missileSpeed };
           }
-          // EADSIM-Lite: flyoutTime 설정 — 경과 시 PSSEK 판정 (물리 비행은 시각화용)
-          intc.flyoutTime = result.launchInfo ? result.launchInfo.flyoutTime : 30;
           this.interceptors.push(intc);
 
           // BDA 등록 (S-L-S)
@@ -595,15 +625,13 @@ export class SimEngine {
         continue;
       }
 
-      // 표적 소멸 체크 — flyout 판정 대기 중이면 유지
+      // 표적 소멸/관통 → 미사일 종료 (계속 추적하지 않음)
       const threat = this.threats.find(t => t.id === intc.targetThreatId);
-      if (!threat || threat.state === 'intercepted') {
+      if (!threat || threat.state === 'intercepted' || threat.state === 'leaked' || threat.state === 'destroyed') {
         intc.state = 'missed';
         this.emit('interceptor-selfdestructed', { interceptor: intc, reason: 'target_lost' });
         continue;
       }
-      // 위협 leaked여도 미사일이 flyout 완료 전이면 계속 비행
-      // (EADSIM: 미사일 발사 시점에 결과가 확률적으로 결정됨, flyout 경과 시 판정)
 
       // PNG 유도 (부스터 이후)
       if (intc.state === 'guiding') {
@@ -639,25 +667,37 @@ export class SimEngine {
   // ──────────────────────────────────────────────────────────
 
   _stepBDA(dt) {
-    // 요격미사일 도달 판정 (2가지 방법 병행)
-    // 방법1: CCD 물리 충돌 (kill_radius 이내 접근 시)
-    // 방법2: EADSIM-Lite flyoutTime 경과 시 PSSEK 자동 판정 (물리 비행은 시각화용)
+    // EADSIM-Lite 판정:
+    // 결과는 발사 시점에 이미 결정됨 (predeterminedHit).
+    // flyoutTime 경과 시 결과 적용. CCD는 시각적 충돌 감지 보조.
+    // 위협이 이미 leaked면 → 요격 실패 (너무 늦음)
     for (const intc of this.interceptors) {
       if (intc.state === 'detonated' || intc.state === 'missed') continue;
 
       const threat = this.threats.find(t => t.id === intc.targetThreatId);
       if (!threat) continue;
 
-      // 방법1: CCD 물리 충돌
+      // flyoutTime 경과 확인 (발사 후 예상 비행시간 도달)
+      const flyoutExpired = intc.flyoutTime && intc.elapsedTime >= intc.flyoutTime;
+      // CCD 보조 체크 (물리적으로 근접한 경우)
       const ccdResult = checkInterceptResult(intc, threat);
 
-      // 방법2: flyoutTime 경과 시 자동 판정
-      const flyoutExpired = intc.flyoutTime && intc.elapsedTime >= intc.flyoutTime;
+      // flyout 미경과 + CCD 미감지 → 아직 대기
+      // 단, 위협이 이미 leaked면 flyout 경과 여부와 무관하게 실패
+      if (!flyoutExpired && !ccdResult) {
+        if (threat.state === 'leaked' || threat.state === 'destroyed') {
+          intc.state = 'missed';
+          this.eventLog.log(EVENT_TYPE.INTERCEPT_MISS, this.simTime, threat.id, {
+            interceptorId: intc.id, pk: intc.pssekPk, reason: 'threat_leaked_before_flyout',
+          });
+          this.emit('bda-result', { threat, interceptor: intc, hit: false });
+          this.emit('interceptor-selfdestructed', { interceptor: intc, reason: 'target_leaked' });
+        }
+        continue;
+      }
 
-      if (!ccdResult && !flyoutExpired) continue;
-
-      // PSSEK 확률 판정
-      const hit = Math.random() < intc.pssekPk;
+      // 발사 시점에 미리 결정된 결과 적용
+      const hit = intc.predeterminedHit;
       const distance = ccdResult ? ccdResult.distance :
         slantRange(intc.position, threat.position) * 1000;
 
@@ -666,14 +706,12 @@ export class SimEngine {
         threat.state = 'intercepted';
         this.eventLog.log(EVENT_TYPE.INTERCEPT_HIT, this.simTime, threat.id, {
           interceptorId: intc.id, pk: intc.pssekPk, distance,
-          method: ccdResult ? 'CCD' : 'flyout',
         });
         this.emit('bda-result', { threat, interceptor: intc, hit: true });
       } else {
         intc.state = 'missed';
         this.eventLog.log(EVENT_TYPE.INTERCEPT_MISS, this.simTime, threat.id, {
           interceptorId: intc.id, pk: intc.pssekPk, distance,
-          method: ccdResult ? 'CCD' : 'flyout',
         });
         this.emit('bda-result', { threat, interceptor: intc, hit: false });
         this.emit('interceptor-selfdestructed', { interceptor: intc, reason: 'miss' });
@@ -711,12 +749,6 @@ export class SimEngine {
     const allResolved = this.threats.every(t =>
       t.state === 'intercepted' || t.state === 'leaked' || t.state === 'destroyed'
     );
-
-    // 아직 비행 중인 미사일이 있으면 완료하지 않음 (flyout 판정 대기)
-    const activeInterceptors = this.interceptors.some(i =>
-      i.state !== 'detonated' && i.state !== 'missed'
-    );
-    if (activeInterceptors) return;
 
     if (allResolved) {
       this.state = SIM_STATE.COMPLETE;
