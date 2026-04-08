@@ -13,7 +13,7 @@
  * 상태: READY → RUNNING → PAUSED → COMPLETE
  * Cesium 무의존 (core 모듈)
  */
-import { ballisticTrajectory, slantRange, pngGuidance } from './physics.js';
+import { ballisticTrajectory, cruiseTrajectory, aircraftTrajectory, slantRange, pngGuidance } from './physics.js';
 import { updateSensorState } from './sensor-model.js';
 import { evaluateEngagement, checkInterceptResult, ENGAGEMENT_RESULT } from './engagement-model.js';
 import { SENSOR_STATE, InterceptorEntity } from './entities.js';
@@ -212,11 +212,12 @@ export class SimEngine {
   // ──────────────────────────────────────────────────────────
 
   _stepThreats(dt) {
-    const threatInfo = this.registry.getThreatInfo('SRBM');
-    if (!threatInfo) return;
-
     for (const threat of this.threats) {
       if (threat.state === 'intercepted' || threat.state === 'leaked' || threat.state === 'destroyed') continue;
+
+      // typeId별 위협 정보 조회 (SRBM, CRUISE_MISSILE, AIRCRAFT 등)
+      const threatInfo = this.registry.getThreatInfo(threat.typeId);
+      if (!threatInfo) continue;
 
       // 총 비행 시간 추정
       const totalDistM = slantRange(threat.startPos, threat.targetPos) * 1000;
@@ -226,13 +227,29 @@ export class SimEngine {
       threat.progress += dt / totalFlightTime;
       if (threat.progress > 1) threat.progress = 1;
 
-      // 탄도 궤적 계산
-      const trajectory = ballisticTrajectory(
-        threat.startPos, threat.targetPos,
-        threatInfo.maxAltitude, threatInfo.baseSpeed, threat.progress
-      );
+      // typeId별 궤적 분기
+      let trajectory;
+      if (threat.typeId === 'CRUISE_MISSILE') {
+        trajectory = cruiseTrajectory(
+          threat.startPos, threat.targetPos,
+          30, threatInfo.baseSpeed, threat.progress  // 해면밀착 30m
+        );
+      } else if (threat.typeId === 'AIRCRAFT') {
+        trajectory = aircraftTrajectory(
+          threat.startPos, threat.targetPos,
+          10000, threatInfo.baseSpeed, threat.progress  // 순항 10km
+        );
+      } else {
+        // SRBM, MLRS_GUIDED 등 탄도탄
+        trajectory = ballisticTrajectory(
+          threat.startPos, threat.targetPos,
+          threatInfo.maxAltitude, threatInfo.baseSpeed, threat.progress
+        );
+      }
 
-      threat.updateFlight(threat.progress, trajectory, 0.1);
+      // RCS를 registry에서 조회 (하드코딩 제거)
+      const phaseRCS = this.registry.getThreatRCS(threat.typeId, trajectory.phase);
+      threat.updateFlight(threat.progress, trajectory, phaseRCS);
 
       // 지면 도달 → 관통 (leaked)
       if (threat.progress >= 1 && threat.state !== 'intercepted') {

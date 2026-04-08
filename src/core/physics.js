@@ -107,6 +107,68 @@ export function ballisticTrajectory(start, target, maxAltitude, baseSpeed, progr
 }
 
 /**
+ * 순항미사일 궤적: 해면밀착(cruiseAlt) → 종말 팝업(500m) → 급강하
+ *
+ * @param {{ lon: number, lat: number, alt: number }} start
+ * @param {{ lon: number, lat: number, alt: number }} target
+ * @param {number} cruiseAlt - 순항 고도 (m, 기본 30)
+ * @param {number} baseSpeed - 기본 속도 (m/s)
+ * @param {number} progress - 비행 진행률 (0~1)
+ * @returns {{ position: { lon: number, lat: number, alt: number }, speed: number, phase: number, rcsMultiplier: number }}
+ */
+export function cruiseTrajectory(start, target, cruiseAlt, baseSpeed, progress) {
+  const t = Math.max(0, Math.min(1, progress));
+  const lon = start.lon + (target.lon - start.lon) * t;
+  const lat = start.lat + (target.lat - start.lat) * t;
+
+  let alt, speed, phase;
+
+  if (t <= 0.85) {
+    // 순항 단계: 해면밀착
+    phase = 0;
+    alt = cruiseAlt;
+    speed = baseSpeed;
+  } else if (t <= 0.92) {
+    // 종말 팝업: 30m → 500m
+    phase = 1;
+    const phaseT = (t - 0.85) / 0.07;
+    alt = cruiseAlt + (500 - cruiseAlt) * phaseT;
+    speed = baseSpeed * 1.1;
+  } else {
+    // 급강하: 500m → 0
+    phase = 2;
+    const phaseT = (t - 0.92) / 0.08;
+    alt = 500 * (1 - phaseT);
+    speed = baseSpeed * 1.2;
+  }
+
+  return { position: { lon, lat, alt }, speed, phase, rcsMultiplier: 1.0 };
+}
+
+/**
+ * 항공기 궤적: 일정 고도 순항 (웨이포인트 기반은 Phase 4)
+ *
+ * @param {{ lon: number, lat: number, alt: number }} start
+ * @param {{ lon: number, lat: number, alt: number }} target
+ * @param {number} cruiseAlt - 순항 고도 (m, 기본 10000)
+ * @param {number} baseSpeed - 기본 속도 (m/s)
+ * @param {number} progress - 비행 진행률 (0~1)
+ * @returns {{ position: { lon: number, lat: number, alt: number }, speed: number, phase: number, rcsMultiplier: number }}
+ */
+export function aircraftTrajectory(start, target, cruiseAlt, baseSpeed, progress) {
+  const t = Math.max(0, Math.min(1, progress));
+  const lon = start.lon + (target.lon - start.lon) * t;
+  const lat = start.lat + (target.lat - start.lat) * t;
+
+  return {
+    position: { lon, lat, alt: cruiseAlt },
+    speed: baseSpeed,
+    phase: 0,
+    rcsMultiplier: 1.0,
+  };
+}
+
+/**
  * 비례항법유도 (Proportional Navigation Guidance)
  * patriot-sim.html의 pngGuide 모듈화 (Cesium 무의존)
  *

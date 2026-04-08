@@ -259,16 +259,13 @@ export class ThreatEntity extends BaseEntity {
    * @param {{ position: { lon: number, lat: number, alt: number }, speed: number, phase: number, rcsMultiplier: number }} trajectory
    * @param {number} baseRCS - 기준 RCS (m²)
    */
-  updateFlight(newProgress, trajectory, baseRCS) {
+  updateFlight(newProgress, trajectory, phaseRCS) {
     this.progress = newProgress;
     this.prevPosition = { ...this.position };
     this.position = { ...trajectory.position };
     this.flightPhase = trajectory.phase;
-    // RCS: 비행 단계에 따라 baseRCS × rcsMultiplier
-    // Phase 0: 부스트 RCS=3.0, Phase 1: 중간 RCS=0.1, Phase 2: 종말 RCS=0.05
-    // rcsMultiplier는 기준값 0.1 대비 비율이므로 원래 rcs값을 직접 사용
-    const phases = [3.0, 0.1, 0.05]; // SRBM 기준
-    this.currentRCS = phases[trajectory.phase] ?? baseRCS;
+    // RCS: registry에서 조회한 위협 타입×비행 단계별 값 사용
+    this.currentRCS = phaseRCS;
   }
 }
 

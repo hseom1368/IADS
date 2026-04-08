@@ -227,7 +227,7 @@ describe('ThreatEntity', () => {
     expect(t.ecmActive).toBe(false);
   });
 
-  it('updateFlight: 진행률 갱신', () => {
+  it('updateFlight: 진행률 갱신 + phaseRCS 반영', () => {
     const t = new ThreatEntity('SRBM', POS, POS);
     const trajectory = {
       position: { lon: 126.5, lat: 38.0, alt: 150000 },
@@ -235,23 +235,24 @@ describe('ThreatEntity', () => {
       phase: 1,
       rcsMultiplier: 1.0,
     };
-    t.updateFlight(0.5, trajectory, 0.1);
+    t.updateFlight(0.5, trajectory, 0.1); // phaseRCS = 0.1 (phase 1)
     expect(t.progress).toBe(0.5);
     expect(t.flightPhase).toBe(1);
-    expect(t.currentRCS).toBe(0.1); // phase 1 RCS
+    expect(t.currentRCS).toBe(0.1);
     expect(t.position.lon).toBe(126.5);
   });
 
-  it('RCS 변화: Phase 0→1→2', () => {
+  it('RCS 변화: registry에서 조회한 값 그대로 사용', () => {
     const t = new ThreatEntity('SRBM', POS, POS);
 
-    t.updateFlight(0.1, { position: POS, speed: 1020, phase: 0, rcsMultiplier: 3.0 }, 0.1);
+    // sim-engine이 registry.getThreatRCS(typeId, phase)로 조회한 값을 전달
+    t.updateFlight(0.1, { position: POS, speed: 1020, phase: 0, rcsMultiplier: 3.0 }, 3.0);
     expect(t.currentRCS).toBe(3.0);
 
     t.updateFlight(0.5, { position: POS, speed: 2040, phase: 1, rcsMultiplier: 1.0 }, 0.1);
     expect(t.currentRCS).toBe(0.1);
 
-    t.updateFlight(0.9, { position: POS, speed: 2550, phase: 2, rcsMultiplier: 0.5 }, 0.1);
+    t.updateFlight(0.9, { position: POS, speed: 2550, phase: 2, rcsMultiplier: 0.5 }, 0.05);
     expect(t.currentRCS).toBe(0.05);
   });
 });
