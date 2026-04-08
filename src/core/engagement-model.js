@@ -98,14 +98,41 @@ export function evaluateEngagement(threat, battery, mfrSensor, registry, simTime
   };
 
   const envelope = registry.getEnvelope(battery.shooterTypeId, missileType);
-  const pip = predictInterceptPoint(threat.position, threatVel, battery.position, envelope, 1, 600, {
-    currentProgress: threat.progress,
-    totalFlightTime: flightTimeEstimate,
-    trajectoryFn,
-  });
+
+  // PIP 산출: 미사일 flyout 후 위협이 봉투 내에 있는 시점 탐색
+  // (미사일과 위협이 동시에 도달하는 교전점)
+  const missileSpeed = missileParams.missileSpeed;
+  let pip = null;
+  for (let t = 0; t <= 300; t += 1) {
+    const futureProgress = Math.min(1, threat.progress + t / flightTimeEstimate);
+    if (futureProgress >= 1) break; // 위협이 착탄
+
+    const futureTraj = trajectoryFn(futureProgress);
+    const futurePos = futureTraj.position;
+    const range = slantRange(battery.position, futurePos);
+    const altKm = futurePos.alt / 1000;
+
+    // 봉투 내 판정
+    if (range < envelope.Rmin || range > envelope.Rmax) continue;
+    if (altKm < envelope.Hmin || altKm > envelope.Hmax) continue;
+
+    // 미사일이 이 지점에 도달하는 데 필요한 시간
+    const flyout = (range * 1000) / missileSpeed;
+
+    // 미사일 flyout ≈ 위협 도달 시간 (±3초 이내)
+    if (Math.abs(flyout - t) <= 3) {
+      pip = { position: futurePos, timeToReach: t, flyout };
+      break;
+    }
+    // 미사일이 위협보다 먼저 도착 가능 (여유 있음)
+    if (flyout <= t) {
+      pip = { position: futurePos, timeToReach: t, flyout };
+      break;
+    }
+  }
 
   if (!pip) {
-    return { result: ENGAGEMENT_RESULT.SKIP, missileType, pk: null, pip: null, launchInfo: null, reason: 'outside_envelope' };
+    return { result: ENGAGEMENT_RESULT.SKIP, missileType, pk: null, pip: null, launchInfo: null, reason: 'no_feasible_pip' };
   }
 
   const rangeToPipKm = slantRange(battery.position, pip.position);
