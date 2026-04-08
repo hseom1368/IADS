@@ -195,8 +195,16 @@ export class SimEngine {
     for (let sub = 0; sub < numSubsteps; sub++) {
       this.simTime += subDt;
 
-      // 6→1→5 순서: BDA 판정 먼저 (flyout 경과 체크), 그 다음 위협/미사일 이동
-      // 위협이 leaked 되기 직전에 flyout 판정이 먼저 실행되어야 함
+      // 2. 센서 갱신 (서브스텝마다 — 탐지 타이밍 정확도)
+      this._stepSensors(subDt);
+
+      // 3. 킬체인 진행
+      this._stepKillchain(subDt);
+
+      // 4. 교전 판정 (킬체인 완료 직후 즉시 발사 가능)
+      this._stepEngagement();
+
+      // 6. BDA 판정 (위협 이동 전에 flyout 판정)
       this._stepBDA(subDt);
 
       // 1. 위협 이동
@@ -205,16 +213,6 @@ export class SimEngine {
       // 5. 요격미사일 유도
       this._stepInterceptors(subDt);
     }
-
-    // 센서/킬체인/교전 판정은 프레임당 1회 (물리 독립)
-    // 2. 센서 갱신
-    this._stepSensors(scaledDt);
-
-    // 3. 킬체인 진행
-    this._stepKillchain(scaledDt);
-
-    // 4. 교전 판정
-    this._stepEngagement();
 
     // 7. 완료 체크
     this._checkCompletion();
@@ -514,11 +512,27 @@ export class SimEngine {
           // EADSIM-Lite 핵심: 발사 시점에 PSSEK로 결과 즉시 결정
           // 물리 비행(PNG)은 시각화용. 결과는 이미 결정됨.
           intc.predeterminedHit = Math.random() < result.pk;
-          intc.flyoutTime = result.launchInfo ? result.launchInfo.flyoutTime : 30;
-          // hit-to-kill: PIP 저장 (이 지점을 향해 직선 비행)
-          intc.pipPosition = result.pip ? { ...result.pip.position } : { ...threat.position };
+          const flyout = result.launchInfo ? result.launchInfo.flyoutTime : 30;
+          intc.flyoutTime = flyout;
 
-          // 초기 속도: PIP 방향으로 직접 지향
+          // hit-to-kill PIP: flyoutTime 후 위협의 예측 위치
+          // 위협 속도 추정 → flyout초 후 위치 산출
+          const threatInfo = this.registry.getThreatInfo(threat.typeId);
+          const totalDistM = slantRange(threat.startPos, threat.targetPos) * 1000;
+          const totalFlightTime = totalDistM / (threatInfo ? threatInfo.baseSpeed : 2040);
+          const futureProgress = Math.min(1, threat.progress + flyout / totalFlightTime);
+
+          let futureTraj;
+          if (threat.typeId === 'CRUISE_MISSILE') {
+            futureTraj = cruiseTrajectory(threat.startPos, threat.targetPos, 30, threatInfo.baseSpeed, futureProgress);
+          } else if (threat.typeId === 'AIRCRAFT') {
+            futureTraj = aircraftTrajectory(threat.startPos, threat.targetPos, 10000, threatInfo.baseSpeed, futureProgress);
+          } else {
+            futureTraj = ballisticTrajectory(threat.startPos, threat.targetPos, threatInfo.maxAltitude, threatInfo.baseSpeed, futureProgress);
+          }
+          intc.pipPosition = { ...futureTraj.position };
+
+          // 초기 속도: 예측 PIP 방향으로 직접 지향
           const DEG2RAD_L = Math.PI / 180;
           const EARTH_R_L = 6371000;
           const cosLatL = Math.cos(battery.position.lat * DEG2RAD_L);
