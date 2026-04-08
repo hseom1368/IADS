@@ -15,7 +15,7 @@
  */
 import { ballisticTrajectory, cruiseTrajectory, aircraftTrajectory, slantRange, pngGuidance } from './physics.js';
 import { updateSensorState } from './sensor-model.js';
-import { evaluateEngagement, checkInterceptResult, ENGAGEMENT_RESULT } from './engagement-model.js';
+import { evaluateEngagement, checkInterceptResult, selectMissileType, ENGAGEMENT_RESULT } from './engagement-model.js';
 import { SENSOR_STATE, InterceptorEntity } from './entities.js';
 import { EventLog, EVENT_TYPE } from './event-log.js';
 import { CommChannel } from './comms.js';
@@ -124,7 +124,7 @@ export class SimEngine {
 
   addThreat(threat) {
     this.threats.push(threat);
-    this.killchainStates.set(threat.id, { stage: KC_STAGE.WAITING_DETECTION, stageStartTime: this.simTime });
+    this.killchainStates.set(threat.id, { stage: KC_STAGE.WAITING_DETECTION, stageStartTime: this.simTime, assignedShooter: null });
     this.eventLog.log(EVENT_TYPE.THREAT_SPAWNED, this.simTime, threat.id, { typeId: threat.typeId });
     this.emit('threat-spawned', { threat });
   }
@@ -447,8 +447,8 @@ export class SimEngine {
       const kc = this.killchainStates.get(threat.id);
       if (!kc || kc.stage !== KC_STAGE.ENGAGEMENT_READY) continue;
 
-      // 포대 및 MFR 센서 찾기
-      const battery = this.batteries[0]; // Phase 1: 단일 포대
+      // 다중 포대 선택: 봉투 적합 + 탄약 가용 + 부하 최소 포대
+      const battery = this._selectBattery(threat);
       if (!battery) continue;
 
       const mfrSensor = this.sensors.find(s => s.id === battery.mfrSensorId);
@@ -514,6 +514,61 @@ export class SimEngine {
         }
       }
     }
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // 포대 선택: 봉투 적합 + 탄약 가용 + 부하 최소
+  // ──────────────────────────────────────────────────────────
+
+  /**
+   * 위협에 최적 포대 선택 (다중 포대 순회)
+   * @param {import('./entities.js').ThreatEntity} threat
+   * @returns {import('./entities.js').BatteryEntity|null}
+   */
+  _selectBattery(threat) {
+    // 킬체인에 이미 배정된 사수가 있으면 우선
+    const kc = this.killchainStates.get(threat.id);
+    if (kc?.assignedShooter) {
+      const assigned = this.batteries.find(b => b.shooterTypeId === kc.assignedShooter && b.operational);
+      if (assigned) return assigned;
+    }
+
+    let bestBattery = null;
+    let bestScore = -Infinity;
+
+    for (const bat of this.batteries) {
+      if (!bat.operational) continue;
+
+      // 미사일 타입 확인
+      const missileType = selectMissileType(bat.shooterTypeId, threat.typeId, this.registry);
+      if (!missileType) continue;
+
+      // 탄약 가용 체크
+      if (!bat.canFire(missileType)) continue;
+
+      // 점수: 탄약 잔여 비율 × (1 - 부하비율) × (1/거리)
+      const totalCapacity = bat.launchers
+        .filter(l => l.missileType === missileType)
+        .reduce((s, l) => s + l.capacity, 0);
+      const remaining = bat.getAmmo(missileType);
+      const ammoRatio = totalCapacity > 0 ? remaining / totalCapacity : 0;
+      const loadRatio = bat.maxSimultaneous > 0 ? bat.activeEngagements / bat.maxSimultaneous : 1;
+      const dist = slantRange(bat.position, threat.position);
+      const distFactor = dist > 0 ? 1 / dist : 1;
+
+      const score = ammoRatio * (1 - loadRatio) * distFactor;
+      if (score > bestScore) {
+        bestScore = score;
+        bestBattery = bat;
+      }
+    }
+
+    // 킬체인에 배정 기록
+    if (bestBattery && kc) {
+      kc.assignedShooter = bestBattery.shooterTypeId;
+    }
+
+    return bestBattery;
   }
 
   // ──────────────────────────────────────────────────────────
