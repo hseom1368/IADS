@@ -34,13 +34,14 @@
 ### 2.1 core/sim-engine.js — 시뮬레이션 엔진
 - `SimEngine` 클래스: requestAnimationFrame 기반 메인 루프
 - `step(dt)`: 매 프레임 호출, dt는 실시간 초 × 배속
-- step 내부 처리 순서 (EADSIM-Lite):
-  1. 위협 이동 (physics — **typeId별 궤적 분기**: 탄도 sin(π×t) / 순항 30m / 항공기 웨이포인트)
-  2. **센서 상태머신 갱신** (sensor-model — 수평선 체크 → 섹터 체크 → SNR 탐지 → 3단계 전이)
-  3. **킬체인 진행** (killchain — C2 노드별 트리거→조건→응답)
-  4. **교전 판정** (engagement-model — PSSEK 5단계, **다중 포대 선택**: selectBattery → selectLauncher)
-  5. 요격미사일 유도 (physics — PNG/CLOS 비행, prevPosition 저장)
-  6. **BDA 판정** (engagement-model — **CCD segment-to-segment** 최근접점 + Pk 판정 + 자폭 처리)
+- `step(dt)`: **0.02초 물리 서브스텝** 단위로 반복. 고속 물체(Mach 9) CCD 정확도 보장.
+- 서브스텝 내부 처리 순서 (EADSIM-Lite):
+  1. **센서 상태머신 갱신** (sensor-model — 수평선 → 섹터 → SNR → 3단계 전이)
+  2. **킬체인 진행** (killchain — C2 노드별 트리거→조건→응답)
+  3. **교전 판정** (engagement-model — PSSEK 5단계, **다중 포대 선택**: selectBattery → selectLauncher)
+  4. **BDA 판정** (engagement-model — predetermined hit 적용 + CCD 보조)
+  5. 위협 이동 (physics — **typeId별 궤적 분기**: 탄도 sin(π×t) / 순항 30m / 항공기)
+  6. 요격미사일 유도 (physics — **hit-to-kill: PIP 직선 비행** / CLOS: 천마 전용)
   7. 메트릭 수집 (metrics)
 - 이벤트 버스: 'sensor-state-change', 'killchain-step', 'engagement-start', 'bda-result', 'threat-leaked', 'simulation-end', 'interceptor-selfdestructed'
 - 상태: READY → RUNNING → PAUSED → COMPLETE
@@ -312,9 +313,12 @@ updateSensorState(sensor, threat, jamming, dt):
 // EADSIM 5단계 교전 판정
 evaluateEngagement(threat, battery, simTime):
 
-  // STEP 1: 교전 봉투 판정
-  pip = predictInterceptPoint(threat, battery)
-  if !registry.isInEnvelope(battery.shooterTypeId, missileType, pip) → SKIP
+  // STEP 1: 교전 봉투 판정 + flyout 실현 가능성 검증
+  pip = predictInterceptPoint(threat, battery, trajectoryFn)
+    // trajectoryFn: threat.typeId별 실제 궤적 함수 (sin 포물선/순항/항공기)
+    // PIP: 미사일 flyout ≤ 위협 도달 시간인 봉투 내 지점
+    // (미사일과 위협이 동시 도달 가능해야 유효)
+  if !pip → SKIP (실현 가능한 교전점 없음)
 
   // STEP 2: 센서 교전급 추적 확인
   mfrState = getSensorState(battery.mfrSensorId, threat.id)
@@ -341,41 +345,57 @@ evaluateEngagement(threat, battery, simTime):
   if battery.activeEngagements >= battery.maxSimultaneous → WAIT
 
   doctrine = getDoctrine(shooterTypeId, threat.typeId)
+  // EADSIM-Lite: 발사 시점에 PSSEK로 결과 즉시 결정 (predetermined hit)
+  interceptor.predeterminedHit = random() < pk
+
   if doctrine === 'SS':
     launchInterceptor(battery, threat, pk)   // 1발
     launchInterceptor(battery, threat, pk)   // 2발 동시
   else: // SLS
-    launchInterceptor(battery, threat, pk)   // 1발
-    scheduleBDA(battery, threat, bdaDelay)   // BDA 타이머 시작
+    launchInterceptor(battery, threat, pk)   // 1발 발사
+    scheduleBDA(battery, threat, flyoutTime) // BDA = flyout 도달 시점
 
-// BDA 완료 후 호출
+// BDA 완료 후 (flyoutTime 경과 시):
 onBDAComplete(battery, threat, interceptor):
-  if interceptor.result === 'HIT' → 교전 종료
-  if interceptor.result === 'MISS':
-    if battery.ammo > 0 && evaluateEngagement 재실행 → 재발사
-    else → 다른 사수 탐색 (다층 핸드오프)
+  // 발사 시점에 결정된 결과 적용
+  if interceptor.predeterminedHit → HIT → 교전 종료
+  if !interceptor.predeterminedHit → MISS:
+    // 2nd Shoot 재발사 판단: 새 PIP 봉투 검증
+    pip2 = predictInterceptPoint(threat, battery, trajectoryFn)
+    if pip2 && isInEnvelope(pip2):
+      재발사 (동일 사수, 2nd Shoot)
+    else:
+      SKIP → 봉투 밖 → Phase 2에서 하위 체계 핸드오프 (천궁-II 등)
 ```
 
 ### 2.6.1 발사 후 물리 시뮬레이션 + 결과 판정
 
 ```javascript
-// 매 프레임 요격미사일 갱신
+// 매 서브스텝(0.02초) 요격미사일 갱신
 updateInterceptor(interceptor, threat, dt):
-  interceptor.prevPosition = interceptor.position  // CCD용 이전 위치 저장
-  if interceptor.guidanceType === 'PNG':
-    pngGuidance(interceptor, threat, dt, N=4)
+  interceptor.prevPosition = interceptor.position  // CCD용
+
+  // 유도 방식별 비행 (시각화용 — 결과는 이미 predetermined)
+  if interceptor.interceptMethod === 'hit-to-kill':
+    // PIP(예상 교전점)으로 직선 비행 (L-SAM ABM, THAAD, PAC-3)
+    // 중간유도(관성+데이터링크) → 종말유도(IIR/DACS)
+    flyToward(interceptor, interceptor.pipPosition, dt)
   else if interceptor.guidanceType === 'CLOS':
     closGuidance(interceptor, threat, operator, dt)  // 천마 전용
+  else:
+    // PNG 비례항법 (근접신관 방식: 천궁, AAM, AIM-120 등)
+    pngGuidance(interceptor, threat, dt, N=4)
 
-  // 연속 충돌 감지 (CCD): segment-to-segment
-  // 미사일과 위협 모두 이동하므로 두 선분 사이 최소 거리 계산
-  closestDist = closestApproachDistance(
-    interceptor.prevPosition, interceptor.position,
-    threat.prevPosition, threat.position)
-  if closestDist <= interceptor.killRadius:
-    // PSSEK 기반 확률 판정
-    if random() < interceptor.pssekPk → HIT
-    else → MISS → 자폭 (화면 제거)
+  // 결과 판정: flyoutTime 경과 시 발사 시점 predetermined 결과 적용
+  if interceptor.elapsedTime >= interceptor.flyoutTime:
+    if interceptor.predeterminedHit → HIT → 폭발(PIP 위치)
+    else → MISS → 자폭
+
+  // CCD 보조: segment-to-segment (시각적 근접 시 조기 판정)
+  closestDist = closestApproachDistance(prev, cur, threatPrev, threatCur)
+  if closestDist <= killRadius → predetermined 결과 적용
+
+  // 위협 지면 도달 시: flyout 미경과 미사일 → MISS(too_late)
   if interceptor.fuelRemaining <= 0 → MISS (연료 소진) → 자폭
 ```
 

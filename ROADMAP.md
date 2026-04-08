@@ -145,6 +145,17 @@
 - [x] `entities.js`: ThreatEntity RCS → registry.getThreatRCS() 조회 (하드코딩 제거)
 - [x] 221개 테스트 전체 통과
 
+#### 1.7.6 교전 판정 고도화 (Phase 1.7 디버깅)
+- [x] PIP 산출: 선형 외삽 → 실제 궤적 함수(sin 포물선) 기반
+- [x] Flyout 실현 가능성: 미사일과 위협 동시 도달 가능 여부 검증 (봉투 내 + flyout ≤ 위협 도달)
+- [x] Predetermined Hit: 발사 시점 PSSEK 결과 저장, flyout 완료 시 적용
+- [x] S-L-S BDA 타이밍: 고정 8초 → flyout 도달 시점 = BDA 확인 시점
+- [x] 2nd Shoot 봉투 검증: MISS 후 새 PIP가 봉투 밖이면 SKIP (Phase 2 하위 체계 핸드오프)
+- [x] Flyout 미경과 보호: 위협 지면 도달 시 flyout 미경과 미사일 → MISS(too_late)
+- [x] 물리 서브스텝: 전체 처리를 0.02초 단위로 세분화 (CCD + 교전 타이밍 정확도)
+- [x] Hit-to-kill 시각화: PNG tail-chase → PIP 직선 비행 (CLOS는 천마 전용)
+- [x] 폭발 위치: 지면 → PIP 근처 (interceptor.pipPosition)
+
 ---
 
 ## Phase 2: 다중 위협 + PSSEK 다양성 + S-L-S/S-S 교리
