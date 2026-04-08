@@ -9,7 +9,7 @@
  *
  * 발사 후: PNG 비행 → kill_radius 도달 → Pk 판정
  */
-import { slantRange, predictInterceptPoint, calculateLaunchTime, closestApproachDistance } from './physics.js';
+import { slantRange, predictInterceptPoint, calculateLaunchTime, closestApproachDistance, ballisticTrajectory, cruiseTrajectory, aircraftTrajectory } from './physics.js';
 import { SENSOR_STATE } from './entities.js';
 import { getAspectAngle } from './sensor-model.js';
 
@@ -74,20 +74,35 @@ export function evaluateEngagement(threat, battery, mfrSensor, registry, simTime
   const missileParams = registry.getMissileParams(battery.shooterTypeId, missileType);
 
   // ── STEP 1: 교전 봉투 판정 ──────────────────────────────
-  // 위협 속도 벡터 추정 (위치→목표 방향)
   const totalDist = slantRange(threat.startPos, threat.targetPos);
   const totalDistM = totalDist * 1000;
   const threatInfo = registry.getThreatInfo(threat.typeId);
   const flightTimeEstimate = totalDistM / (threatInfo ? threatInfo.baseSpeed : 2040);
 
+  // 하위 호환용 선형 속도 벡터
   const threatVel = {
     dLon: (threat.targetPos.lon - threat.startPos.lon) / flightTimeEstimate,
     dLat: (threat.targetPos.lat - threat.startPos.lat) / flightTimeEstimate,
     dAlt: (threat.targetPos.alt - threat.startPos.alt) / flightTimeEstimate,
   };
 
+  // 실제 궤적 함수 기반 PIP 예측 (sin 포물선 / 순항 / 항공기)
+  const trajectoryFn = (progress) => {
+    if (threat.typeId === 'CRUISE_MISSILE') {
+      return cruiseTrajectory(threat.startPos, threat.targetPos, 30, threatInfo.baseSpeed, progress);
+    } else if (threat.typeId === 'AIRCRAFT') {
+      return aircraftTrajectory(threat.startPos, threat.targetPos, 10000, threatInfo.baseSpeed, progress);
+    } else {
+      return ballisticTrajectory(threat.startPos, threat.targetPos, threatInfo.maxAltitude, threatInfo.baseSpeed, progress);
+    }
+  };
+
   const envelope = registry.getEnvelope(battery.shooterTypeId, missileType);
-  const pip = predictInterceptPoint(threat.position, threatVel, battery.position, envelope, 1, 600);
+  const pip = predictInterceptPoint(threat.position, threatVel, battery.position, envelope, 1, 600, {
+    currentProgress: threat.progress,
+    totalFlightTime: flightTimeEstimate,
+    trajectoryFn,
+  });
 
   if (!pip) {
     return { result: ENGAGEMENT_RESULT.SKIP, missileType, pk: null, pip: null, launchInfo: null, reason: 'outside_envelope' };

@@ -532,11 +532,11 @@ export class SimEngine {
           }
           intc.pipPosition = { ...futureTraj.position };
 
-          // 초기 속도: 예측 PIP 방향으로 직접 지향
+          // 초기 속도: flyout 후 예측 PIP 방향으로 직접 지향
           const DEG2RAD_L = Math.PI / 180;
           const EARTH_R_L = 6371000;
           const cosLatL = Math.cos(battery.position.lat * DEG2RAD_L);
-          const aimTarget = result.pip ? result.pip.position : threat.position;
+          const aimTarget = intc.pipPosition;
           const dx = (aimTarget.lon - battery.position.lon) * DEG2RAD_L * cosLatL * EARTH_R_L;
           const dy = (aimTarget.lat - battery.position.lat) * DEG2RAD_L * EARTH_R_L;
           const dz = aimTarget.alt - battery.position.alt;

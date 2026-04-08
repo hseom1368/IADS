@@ -89,22 +89,27 @@ describe('evaluateEngagement', () => {
 
   it('STEP 5: 동시교전 상한 초과 → WAIT', () => {
     const threat = makeSRBM();
+    // 위협이 이미 봉투 내 (progress 높게) → STEP 3 통과
+    threat.progress = 0.75;
+    threat.position = { lon: 127.0, lat: 37.5, alt: 55000 };
     const battery = makeBattery();
     battery.activeEngagements = 10; // 상한 도달
     const sensor = makeMFR(threat.id);
 
-    const result = evaluateEngagement(threat, battery, sensor, registry, 200);
+    const result = evaluateEngagement(threat, battery, sensor, registry, 9999);
     expect(result.result).toBe(ENGAGEMENT_RESULT.WAIT);
     expect(result.reason).toBe('capacity_or_ammo');
   });
 
   it('STEP 5: 탄약 소진 → WAIT', () => {
     const threat = makeSRBM();
+    threat.progress = 0.75;
+    threat.position = { lon: 127.0, lat: 37.5, alt: 55000 };
     const battery = makeBattery();
     for (const l of battery.launchers) { if (l.missileType === 'ABM') l.remaining = 0; }
     const sensor = makeMFR(threat.id);
 
-    const result = evaluateEngagement(threat, battery, sensor, registry, 200);
+    const result = evaluateEngagement(threat, battery, sensor, registry, 9999);
     expect(result.result).toBe(ENGAGEMENT_RESULT.WAIT);
     expect(result.reason).toBe('capacity_or_ammo');
   });

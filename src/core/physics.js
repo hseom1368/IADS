@@ -280,43 +280,49 @@ export function isInSector(sensorPos, targetPos, maxRange, azimuthCenter, azimut
 /**
  * 위협 궤적 예측 → 예상 교전점(PIP) 산출
  *
- * 위협의 현재 위치와 속도벡터로 미래 위치를 선형 예측하고,
+ * 실제 궤적 함수(sin 포물선/순항/항공기)를 사용하여 미래 위치를 정확히 예측.
  * 교전 봉투(Rmin~Rmax, Hmin~Hmax)에 진입하는 지점을 PIP로 산출.
  *
  * @param {{ lon: number, lat: number, alt: number }} threatPos - 위협 현재 위치
- * @param {{ dLon: number, dLat: number, dAlt: number }} threatVel - 위협 속도 (도/s, 도/s, m/s)
+ * @param {{ dLon: number, dLat: number, dAlt: number }} threatVel - 위협 속도 (하위 호환용, trajectoryFn 없을 때)
  * @param {{ lon: number, lat: number, alt: number }} shooterPos - 사수 위치
  * @param {{ Rmin: number, Rmax: number, Hmin: number, Hmax: number }} envelope - 교전 봉투 (km, km)
  * @param {number} [dtStep=1] - 예측 시간 간격 (s)
  * @param {number} [maxTime=600] - 최대 예측 시간 (s)
+ * @param {object} [trajectoryCtx] - 궤적 예측 컨텍스트 (sin 포물선 기반)
+ * @param {number} [trajectoryCtx.currentProgress] - 현재 비행 진행률 (0~1)
+ * @param {number} [trajectoryCtx.totalFlightTime] - 총 비행 시간 (s)
+ * @param {function} [trajectoryCtx.trajectoryFn] - (progress) → { position }
  * @returns {{ position: { lon: number, lat: number, alt: number }, timeToReach: number } | null}
  */
-export function predictInterceptPoint(threatPos, threatVel, shooterPos, envelope, dtStep = 1, maxTime = 600) {
-  let bestPip = null;
-  let bestTime = Infinity;
-
+export function predictInterceptPoint(threatPos, threatVel, shooterPos, envelope, dtStep = 1, maxTime = 600, trajectoryCtx = null) {
   for (let t = 0; t <= maxTime; t += dtStep) {
-    const futurePos = {
-      lon: threatPos.lon + threatVel.dLon * t,
-      lat: threatPos.lat + threatVel.dLat * t,
-      alt: threatPos.alt + threatVel.dAlt * t,
-    };
+    let futurePos;
+
+    if (trajectoryCtx && trajectoryCtx.trajectoryFn) {
+      // 실제 궤적 함수 기반 예측 (sin 포물선 등)
+      const futureProgress = Math.min(1, trajectoryCtx.currentProgress + t / trajectoryCtx.totalFlightTime);
+      const traj = trajectoryCtx.trajectoryFn(futureProgress);
+      futurePos = traj.position;
+    } else {
+      // 하위 호환: 선형 외삽
+      futurePos = {
+        lon: threatPos.lon + threatVel.dLon * t,
+        lat: threatPos.lat + threatVel.dLat * t,
+        alt: threatPos.alt + threatVel.dAlt * t,
+      };
+    }
 
     const range = slantRange(shooterPos, futurePos);
     const altKm = futurePos.alt / 1000;
 
-    // 봉투 진입 판정
     if (range >= envelope.Rmin && range <= envelope.Rmax &&
         altKm >= envelope.Hmin && altKm <= envelope.Hmax) {
-      if (t < bestTime) {
-        bestTime = t;
-        bestPip = { position: futurePos, timeToReach: t };
-      }
-      break; // 최초 봉투 진입 시점이 PIP
+      return { position: futurePos, timeToReach: t };
     }
   }
 
-  return bestPip;
+  return null;
 }
 
 /**
