@@ -59,28 +59,29 @@ export function ballisticTrajectory(start, target, maxAltitude, baseSpeed, progr
   const lon = start.lon + (target.lon - start.lon) * t;
   const lat = start.lat + (target.lat - start.lat) * t;
 
-  let alt, speed, phase, rcsMultiplier;
+  // 포물선 고도: sin(π*t) → t=0: 0, t=0.5: maxAlt, t=1: 0
+  const alt = maxAltitude * Math.sin(Math.PI * t);
+
+  // Phase 구분은 속도/RCS 용도로 유지
+  let speed, phase, rcsMultiplier;
 
   if (t <= 0.25) {
-    // Phase 1: Boost — 고도 상승, 속도 증가
+    // Phase 0: Boost — 속도 증가, RCS 대 (부스터 플룸)
     phase = 0;
     const phaseT = t / 0.25;
-    alt = maxAltitude * phaseT;
     speed = baseSpeed * (0.5 + 0.5 * phaseT);
-    rcsMultiplier = 3.0; // 부스터 플룸으로 RCS 증가
+    rcsMultiplier = 3.0;
   } else if (t <= 0.70) {
-    // Phase 2: Midcourse — 최대 고도 유지, 일정 속도
+    // Phase 1: Midcourse — 일정 속도, RCS 중
     phase = 1;
-    alt = maxAltitude;
     speed = baseSpeed;
     rcsMultiplier = 0.1 / 0.1; // RCS 0.1m² (기준값 대비 1.0)
   } else {
-    // Phase 3: Terminal — 고도 하강, 속도 증가
+    // Phase 2: Terminal — 속도 증가, RCS 소 (재돌입체)
     phase = 2;
     const phaseT = (t - 0.70) / 0.30;
-    alt = maxAltitude * (1 - phaseT);
     speed = baseSpeed * (1.0 + 0.5 * phaseT);
-    rcsMultiplier = 0.05 / 0.1; // RCS 0.05m² (재돌입체)
+    rcsMultiplier = 0.05 / 0.1;
   }
 
   return {
@@ -270,6 +271,58 @@ export function calculateLaunchTime(shooterPos, pipPosition, timeToReachPip, mis
   }
 
   return { launchTime, flyoutTime, overdue: false };
+}
+
+/**
+ * 선분(prevPos→curPos) 위에서 targetPos까지의 최소 거리 계산
+ * (연속 충돌 감지 — 고속 물체가 kill radius를 건너뛰는 문제 해결)
+ *
+ * @param {{ lon: number, lat: number, alt: number }} prevPos - 이전 위치
+ * @param {{ lon: number, lat: number, alt: number }} curPos - 현재 위치
+ * @param {{ lon: number, lat: number, alt: number }} targetPos - 표적 위치
+ * @returns {number} 최소 거리 (km)
+ */
+export function closestApproachOnSegment(prevPos, curPos, targetPos) {
+  // WGS84 → 로컬 미터 근사 (prevPos 기준)
+  const cosLat = Math.cos(prevPos.lat * DEG2RAD);
+  const mPerDegLon = EARTH_RADIUS_KM * 1000 * DEG2RAD * cosLat;
+  const mPerDegLat = EARTH_RADIUS_KM * 1000 * DEG2RAD;
+
+  // 선분 A→B, 점 P
+  const ax = (prevPos.lon - prevPos.lon) * mPerDegLon; // 0
+  const ay = (prevPos.lat - prevPos.lat) * mPerDegLat; // 0
+  const az = prevPos.alt - prevPos.alt;                 // 0
+
+  const bx = (curPos.lon - prevPos.lon) * mPerDegLon;
+  const by = (curPos.lat - prevPos.lat) * mPerDegLat;
+  const bz = curPos.alt - prevPos.alt;
+
+  const px = (targetPos.lon - prevPos.lon) * mPerDegLon;
+  const py = (targetPos.lat - prevPos.lat) * mPerDegLat;
+  const pz = targetPos.alt - prevPos.alt;
+
+  // 선분 A→B 위 최근접점: t = dot(AP, AB) / dot(AB, AB), clamped [0,1]
+  const abx = bx, aby = by, abz = bz; // A is origin
+  const abLenSq = abx * abx + aby * aby + abz * abz;
+
+  if (abLenSq < 0.001) {
+    // 이전/현재 위치 동일 → 직접 거리
+    return Math.sqrt(px * px + py * py + pz * pz) / 1000;
+  }
+
+  const t = Math.max(0, Math.min(1, (px * abx + py * aby + pz * abz) / abLenSq));
+
+  // 최근접점 좌표
+  const cx = abx * t;
+  const cy = aby * t;
+  const cz = abz * t;
+
+  // 최근접점 → 표적 거리
+  const dx = px - cx;
+  const dy = py - cy;
+  const dz = pz - cz;
+
+  return Math.sqrt(dx * dx + dy * dy + dz * dz) / 1000; // km
 }
 
 // 내부 상수 내보내기 (테스트용)

@@ -11,6 +11,7 @@ import {
   isInSector,
   predictInterceptPoint,
   calculateLaunchTime,
+  closestApproachOnSegment,
   DEG2RAD,
   EARTH_RADIUS_KM,
 } from '../src/core/physics.js';
@@ -86,17 +87,19 @@ describe('ballisticTrajectory', () => {
     expect(result.rcsMultiplier).toBe(3.0);
   });
 
-  it('progress=0.25 → Phase 0 끝, 최대 고도 도달, 속도 1.0배', () => {
+  it('progress=0.25 → Phase 0 끝, 포물선 고도 sin(45°)≈70.7%, 속도 1.0배', () => {
     const result = ballisticTrajectory(start, target, maxAlt, baseSpeed, 0.25);
     expect(result.phase).toBe(0);
-    expectClose(result.position.alt, maxAlt, 1);
+    // sin(π×0.25) = sin(45°) ≈ 0.707 → 150000 × 0.707 ≈ 106066
+    expectClose(result.position.alt, maxAlt * Math.sin(Math.PI * 0.25), 1);
     expectClose(result.speed, baseSpeed, 1);
   });
 
-  it('progress=0.5 → Phase 1, 최대 고도 유지, RCS 1.0', () => {
+  it('progress=0.5 → Phase 1, 포물선 정점 (최대 고도), RCS 1.0', () => {
     const result = ballisticTrajectory(start, target, maxAlt, baseSpeed, 0.5);
     expect(result.phase).toBe(1);
-    expect(result.position.alt).toBe(maxAlt);
+    // sin(π×0.5) = 1.0 → 정점
+    expectClose(result.position.alt, maxAlt, 1);
     expect(result.speed).toBe(baseSpeed);
     expectClose(result.rcsMultiplier, 1.0, 1);
   });
@@ -340,5 +343,51 @@ describe('calculateLaunchTime', () => {
     expect(result).not.toBeNull();
     // launchTime + flyoutTime + 3 = 200
     expectClose(result.launchTime + result.flyoutTime + 3, 200, 1);
+  });
+});
+
+// ════════════════════════════════════════════════════════════
+// 7. closestApproachOnSegment — 연속 충돌 감지
+// ════════════════════════════════════════════════════════════
+describe('closestApproachOnSegment', () => {
+  it('동일 위치 (이전=현재=표적) → 0 km', () => {
+    const pos = { lon: 127.0, lat: 37.0, alt: 10000 };
+    expect(closestApproachOnSegment(pos, pos, pos)).toBeCloseTo(0, 1);
+  });
+
+  it('표적이 선분 위에 있을 때 → 0에 근접', () => {
+    const prev = { lon: 127.0, lat: 37.0, alt: 10000 };
+    const cur = { lon: 127.0, lat: 37.1, alt: 10000 };
+    const target = { lon: 127.0, lat: 37.05, alt: 10000 }; // 중간점
+    const dist = closestApproachOnSegment(prev, cur, target);
+    expect(dist).toBeLessThan(0.1); // 100m 이내
+  });
+
+  it('미사일이 표적을 건너뛸 때 → 최소 거리 감지', () => {
+    // 미사일: 37.0 → 37.2 (약 22km 이동), 표적: 37.1 옆 500m
+    const prev = { lon: 127.0, lat: 37.0, alt: 50000 };
+    const cur = { lon: 127.0, lat: 37.2, alt: 50000 };
+    const target = { lon: 127.005, lat: 37.1, alt: 50000 }; // 약 500m 옆
+    const dist = closestApproachOnSegment(prev, cur, target);
+    // 최근접점은 lat=37.1 부근, 횡방향 ~450m
+    expect(dist).toBeLessThan(1); // 1km 이내
+    expect(dist).toBeGreaterThan(0.1); // 100m 이상 (500m 옆이니까)
+  });
+
+  it('표적이 선분 시작점 앞에 있을 때 → 시작점까지 거리', () => {
+    const prev = { lon: 127.0, lat: 37.1, alt: 10000 };
+    const cur = { lon: 127.0, lat: 37.2, alt: 10000 };
+    const target = { lon: 127.0, lat: 37.0, alt: 10000 }; // 선분 뒤
+    const dist = closestApproachOnSegment(prev, cur, target);
+    // prev(37.1)까지 거리 ≈ 11.1km
+    expectClose(dist, 11.1, 5);
+  });
+
+  it('고도차 포함 3D 거리', () => {
+    const prev = { lon: 127.0, lat: 37.0, alt: 50000 };
+    const cur = { lon: 127.0, lat: 37.0, alt: 50000 };
+    const target = { lon: 127.0, lat: 37.0, alt: 50050 }; // 50m 위
+    const dist = closestApproachOnSegment(prev, cur, target);
+    expectClose(dist, 0.05, 5); // 50m = 0.05km
   });
 });

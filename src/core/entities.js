@@ -294,6 +294,7 @@ export class InterceptorEntity extends BaseEntity {
     this.killRadius = killRadius;
     this.guidanceType = guidanceType;
     this.velocity = { x: 0, y: 0, z: 0 }; // ENU (m/s)
+    this.prevPosition = { ...position };  // 이전 위치 (연속 충돌 감지용)
     this.fuelRemaining = 60;    // seconds
     this.state = 'boosting';    // boosting | guiding | detonated | missed
     this.boostTime = 2.0;       // 부스터 시간 (s)

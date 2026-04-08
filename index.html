@@ -105,8 +105,8 @@ const POS = {
   KAMD_OPS:   { lon: 127.0, lat: 36.8, alt: 100 },    // 오산
   ICC:        { lon: 127.05, lat: 37.05, alt: 100 },   // 전방 대대
   ECS:        { lon: 127.03, lat: 37.08, alt: 100 },   // 포대 ECS
-  LSAM_MFR:   { lon: 127.03, lat: 37.1, alt: 150 },   // L-SAM MFR
-  LSAM_BAT:   { lon: 127.03, lat: 37.1, alt: 150 },   // L-SAM 포대
+  LSAM_MFR:   { lon: 127.04, lat: 37.12, alt: 180 },   // L-SAM MFR (포대 북동 ~1km)
+  LSAM_BAT:   { lon: 127.03, lat: 37.1, alt: 150 },   // L-SAM 발사대
   SRBM_ORIGIN: { lon: 127.0, lat: 39.5, alt: 0 },     // 북방 발사원점
   SRBM_TARGET: { lon: 127.03, lat: 37.0, alt: 0 },    // 수도권 표적
 };
@@ -209,17 +209,19 @@ function setupViz() {
   radarViz.addRadar('gp', POS.GREEN_PINE, 900, '#44cc44');
   radarViz.addRadar('mfr', POS.LSAM_MFR, 310, '#00aaff');
 
-  // C2 네트워크 노드
+  // C2 네트워크 노드 (MFR과 발사대 분리)
   networkViz.addNode('GREEN_PINE_B', 'GREEN_PINE_B', 'GREEN PINE', POS.GREEN_PINE);
   networkViz.addNode('KAMD_OPS', 'KAMD_OPS', 'KAMD OPS', POS.KAMD_OPS);
   networkViz.addNode('ICC', 'ICC', 'ICC', POS.ICC);
   networkViz.addNode('ECS', 'ECS', 'ECS', POS.ECS);
+  networkViz.addNode('LSAM_MFR', 'LSAM_MFR', 'L-SAM MFR', POS.LSAM_MFR);
   networkViz.addNode('LSAM', 'LSAM', 'L-SAM', POS.LSAM_BAT);
 
-  // 데이터링크
+  // 데이터링크 (MFR↔ECS internal 0.5s 포함)
   networkViz.addLink('GREEN_PINE_B', 'KAMD_OPS', POS.GREEN_PINE, POS.KAMD_OPS, 'longRange');
   networkViz.addLink('KAMD_OPS', 'ICC', POS.KAMD_OPS, POS.ICC, 'longRange');
   networkViz.addLink('ICC', 'ECS', POS.ICC, POS.ECS, 'shortRange');
+  networkViz.addLink('LSAM_MFR', 'ECS', POS.LSAM_MFR, POS.ECS, 'internal');
   networkViz.addLink('ECS', 'LSAM', POS.ECS, POS.LSAM_BAT, 'shortRange');
 
   hud.addLog('System initialized');

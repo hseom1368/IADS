@@ -31,8 +31,8 @@ function createPhase1Engine(skill = 'high') {
   const gp = new SensorEntity('GREEN_PINE_B', { lon: 127.0, lat: 36.0, alt: 200 });
   engine.addSensor(gp);
 
-  // LSAM_MFR (전방, 화력통제)
-  const mfr = new SensorEntity('LSAM_MFR', { lon: 127.03, lat: 37.1, alt: 150 });
+  // LSAM_MFR (포대 북동 ~1km, 화력통제)
+  const mfr = new SensorEntity('LSAM_MFR', { lon: 127.04, lat: 37.12, alt: 180 });
   engine.addSensor(mfr);
 
   // C2 체인: KAMD_OPS → ICC → ECS

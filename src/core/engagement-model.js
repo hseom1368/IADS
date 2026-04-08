@@ -9,7 +9,7 @@
  *
  * 발사 후: PNG 비행 → kill_radius 도달 → Pk 판정
  */
-import { slantRange, predictInterceptPoint, calculateLaunchTime } from './physics.js';
+import { slantRange, predictInterceptPoint, calculateLaunchTime, closestApproachOnSegment } from './physics.js';
 import { SENSOR_STATE } from './entities.js';
 import { getAspectAngle } from './sensor-model.js';
 
@@ -164,7 +164,8 @@ export function evaluateEngagement(threat, battery, mfrSensor, registry, simTime
 /**
  * 요격미사일 도달 판정 (매 프레임 호출)
  *
- * kill_radius 도달 시 PSSEK 확률로 HIT/MISS 판정
+ * 연속 충돌 감지: 이전 위치→현재 위치 선분에서 표적까지 최소 거리 계산.
+ * 고속 미사일이 kill_radius를 한 step에 건너뛰는 문제 해결.
  *
  * @param {import('./entities.js').InterceptorEntity} interceptor
  * @param {import('./entities.js').ThreatEntity} threat
@@ -172,14 +173,17 @@ export function evaluateEngagement(threat, battery, mfrSensor, registry, simTime
  * @returns {{ hit: boolean, distance: number }|null} null이면 아직 도달 안 함
  */
 export function checkInterceptResult(interceptor, threat, randomFn = Math.random) {
-  const distanceKm = slantRange(interceptor.position, threat.position);
-  const distanceM = distanceKm * 1000;
+  // 연속 충돌 감지: prevPosition→position 선분 위 최근접점
+  const closestKm = closestApproachOnSegment(
+    interceptor.prevPosition, interceptor.position, threat.position
+  );
+  const closestM = closestKm * 1000;
 
-  if (distanceM > interceptor.killRadius) return null;
+  if (closestM > interceptor.killRadius) return null;
 
   // PSSEK 확률 판정
   const hit = randomFn() < interceptor.pssekPk;
-  return { hit, distance: distanceM };
+  return { hit, distance: closestM };
 }
 
 /**

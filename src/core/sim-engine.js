@@ -453,8 +453,33 @@ export class SimEngine {
           );
           intc.batteryId = battery.id;
 
-          // 초기 속도: 수직 상승 (부스터)
-          intc.velocity = { x: 0, y: 0, z: result.missileSpeed };
+          // 초기 속도: 수직 80% + 위협 방향 20% (수직발사 후 즉시 기동 전환)
+          const DEG2RAD_L = Math.PI / 180;
+          const EARTH_R_L = 6371000;
+          const cosLatL = Math.cos(battery.position.lat * DEG2RAD_L);
+          const toThreatX = (threat.position.lon - battery.position.lon) * DEG2RAD_L * cosLatL * EARTH_R_L;
+          const toThreatY = (threat.position.lat - battery.position.lat) * DEG2RAD_L * EARTH_R_L;
+          const toThreatZ = threat.position.alt - battery.position.alt;
+          const toThreatMag = Math.sqrt(toThreatX ** 2 + toThreatY ** 2 + toThreatZ ** 2);
+          if (toThreatMag > 0) {
+            const lateralFrac = 0.2;
+            const verticalFrac = 0.8;
+            const nx = toThreatX / toThreatMag;
+            const ny = toThreatY / toThreatMag;
+            const nz = toThreatZ / toThreatMag;
+            intc.velocity = {
+              x: nx * lateralFrac * result.missileSpeed,
+              y: ny * lateralFrac * result.missileSpeed,
+              z: Math.max(nz, verticalFrac) * result.missileSpeed,
+            };
+            // 속도 크기 정규화
+            const vMag = Math.sqrt(intc.velocity.x ** 2 + intc.velocity.y ** 2 + intc.velocity.z ** 2);
+            intc.velocity.x *= result.missileSpeed / vMag;
+            intc.velocity.y *= result.missileSpeed / vMag;
+            intc.velocity.z *= result.missileSpeed / vMag;
+          } else {
+            intc.velocity = { x: 0, y: 0, z: result.missileSpeed };
+          }
           this.interceptors.push(intc);
 
           // BDA 등록 (S-L-S)
@@ -478,6 +503,9 @@ export class SimEngine {
   _stepInterceptors(dt) {
     for (const intc of this.interceptors) {
       if (intc.state === 'detonated' || intc.state === 'missed') continue;
+
+      // 이전 위치 저장 (연속 충돌 감지용)
+      intc.prevPosition = { ...intc.position };
 
       intc.tick(dt);
 
