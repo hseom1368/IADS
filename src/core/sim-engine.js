@@ -515,6 +515,8 @@ export class SimEngine {
           // 물리 비행(PNG)은 시각화용. 결과는 이미 결정됨.
           intc.predeterminedHit = Math.random() < result.pk;
           intc.flyoutTime = result.launchInfo ? result.launchInfo.flyoutTime : 30;
+          // hit-to-kill: PIP 저장 (이 지점을 향해 직선 비행)
+          intc.pipPosition = result.pip ? { ...result.pip.position } : { ...threat.position };
 
           // 초기 속도: PIP 방향으로 직접 지향
           const DEG2RAD_L = Math.PI / 180;
@@ -633,22 +635,38 @@ export class SimEngine {
         continue;
       }
 
-      // PNG 유도 (부스터 이후)
+      // 유도 방식별 비행 (부스터 이후)
       if (intc.state === 'guiding') {
-        // 위협 위치를 ENU 근사 좌표로 변환 (intc.position 기준)
         const DEG2RAD = Math.PI / 180;
-        const EARTH_R = 6371000; // m
+        const EARTH_R = 6371000;
         const cosLat = Math.cos(intc.position.lat * DEG2RAD);
 
-        const targetENU = {
-          x: (threat.position.lon - intc.position.lon) * DEG2RAD * cosLat * EARTH_R,
-          y: (threat.position.lat - intc.position.lat) * DEG2RAD * EARTH_R,
-          z: threat.position.alt - intc.position.alt,
-        };
-        const myENU = { x: 0, y: 0, z: 0 };
-
-        const newVel = pngGuidance(intc.velocity, targetENU, myENU, intc.missileSpeed, dt, 4);
-        intc.velocity = newVel;
+        if (intc.guidanceType === 'CLOS') {
+          // CLOS: 천마 전용 — 운용자가 표적 추적, 미사일은 시선 일치
+          // Phase 4에서 구현, 현재는 PNG 대체
+          const targetENU = {
+            x: (threat.position.lon - intc.position.lon) * DEG2RAD * cosLat * EARTH_R,
+            y: (threat.position.lat - intc.position.lat) * DEG2RAD * EARTH_R,
+            z: threat.position.alt - intc.position.alt,
+          };
+          intc.velocity = pngGuidance(intc.velocity, targetENU, { x: 0, y: 0, z: 0 }, intc.missileSpeed, dt, 4);
+        } else {
+          // hit-to-kill / guided: PIP(예상 교전점)를 향해 직선 비행
+          // 실제 미사일은 중간유도(관성+데이터링크) → 종말유도(IIR/레이더)
+          // 시각화: PIP로 직선 비행 (PNG tail-chase 아님)
+          const pip = intc.pipPosition || threat.position;
+          const dx = (pip.lon - intc.position.lon) * DEG2RAD * cosLat * EARTH_R;
+          const dy = (pip.lat - intc.position.lat) * DEG2RAD * EARTH_R;
+          const dz = pip.alt - intc.position.alt;
+          const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          if (dist > 1) {
+            intc.velocity = {
+              x: (dx / dist) * intc.missileSpeed,
+              y: (dy / dist) * intc.missileSpeed,
+              z: (dz / dist) * intc.missileSpeed,
+            };
+          }
+        }
       }
 
       // 위치 갱신 (ENU → WGS84 근사)

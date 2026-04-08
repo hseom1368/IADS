@@ -183,13 +183,15 @@ function createEngine() {
   engine.on('bda-result', ({ threat, interceptor, hit }) => {
     if (hit) {
       hits++;
-      engagementViz.explode(threat.position, true);
+      // hit-to-kill: 요격미사일 위치(PIP 근처)에서 폭발 표시
+      const explodePos = interceptor.pipPosition || interceptor.position;
+      engagementViz.explode(explodePos, true);
       engagementViz.removeThreat(threat.id);
       engagementViz.removeInterceptor(interceptor.id);
-      hud.addLog(`HIT: ${threat.id} intercepted!`, '#00ff88');
+      hud.addLog(`HIT: ${threat.id} intercepted! (hit-to-kill at PIP)`, '#00ff88');
     } else {
       engagementViz.removeInterceptor(interceptor.id);
-      hud.addLog(`MISS: ${threat.id} — BDA pending`, '#ff4444');
+      hud.addLog(`MISS: ${threat.id} — leaked`, '#ff4444');
     }
   });
 
