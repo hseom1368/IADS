@@ -187,6 +187,14 @@ function createEngine() {
     }
   });
 
+  engine.on('interceptor-selfdestructed', ({ interceptor, reason }) => {
+    engagementViz.explode(interceptor.position, true); // 소규모 자폭 이펙트
+    engagementViz.removeInterceptor(interceptor.id);
+    if (reason === 'fuel') {
+      hud.addLog(`SELF-DESTRUCT: ${interceptor.id} fuel depleted`, '#ff8800');
+    }
+  });
+
   engine.on('threat-leaked', ({ threat }) => {
     leaks++;
     engagementViz.explode(threat.position, false);

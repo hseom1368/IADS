@@ -509,16 +509,18 @@ export class SimEngine {
 
       intc.tick(dt);
 
-      // 연료 소진
+      // 연료 소진 → 자폭
       if (intc.isFuelDepleted()) {
         intc.state = 'missed';
+        this.emit('interceptor-selfdestructed', { interceptor: intc, reason: 'fuel' });
         continue;
       }
 
-      // 표적 찾기
+      // 표적 소멸 → 자폭
       const threat = this.threats.find(t => t.id === intc.targetThreatId);
       if (!threat || threat.state === 'intercepted' || threat.state === 'leaked') {
         intc.state = 'missed';
+        this.emit('interceptor-selfdestructed', { interceptor: intc, reason: 'target_lost' });
         continue;
       }
 
@@ -579,6 +581,7 @@ export class SimEngine {
           interceptorId: intc.id, pk: intc.pssekPk, distance: result.distance,
         });
         this.emit('bda-result', { threat, interceptor: intc, hit: false });
+        this.emit('interceptor-selfdestructed', { interceptor: intc, reason: 'miss' });
       }
     }
 
