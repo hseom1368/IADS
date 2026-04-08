@@ -115,41 +115,35 @@
 > Phase 2에서 대규모 리팩토링 없이 무기체계/위협 추가가 가능하도록 기반 정비.
 
 #### 1.7.1 발사대(TEL) 개별 모델링
-- [ ] `entities.js`: BatteryEntity를 발사대 배열 구조로 리팩토링
+- [x] `entities.js`: BatteryEntity를 발사대 배열 구조로 리팩토링
   - `launchers: [{ id, missileType, capacity, remaining }]`
-  - `fire()` → `fireLauncher(launcherId)` + 발사대 선택 로직
-- [ ] `engagement-model.js`: `selectLauncher(battery, missileType)` 함수 추가
-- [ ] `weapon-data.js`: 기존 `launchers` 메타데이터를 런타임에서 활용
-- [ ] 테스트: 발사대별 탄약 차감, 특정 발사대 소진 시 다른 발사대 자동 선택
+  - `selectLauncher()` + `fire()` → `{ launcherId }` 반환
+- [x] `weapon-data.js`: 기존 `launchers` 메타데이터를 런타임에서 활용 (batteryConfig)
+- [x] 테스트: 발사대별 탄약 차감, 특정 발사대 소진 시 다른 발사대 자동 선택
 
 #### 1.7.2 레이더 수평선 (지구 곡률 기본 모델)
-- [ ] `physics.js`: `radarHorizon(antennaAltKm, targetAltKm)` 함수 추가
+- [x] `physics.js`: `radarHorizon(antennaAltM, targetAltM)` 함수 추가
   - `horizon = sqrt(2×R_earth×h_ant) + sqrt(2×R_earth×h_target)` (EADSIM 표준)
-- [ ] `sensor-model.js`: `updateSensorState()`에서 SNR 계산 전 수평선 체크
-  - 수평선 밖 → UNDETECTED 유지 (SNR 계산 자체를 스킵)
-- [ ] `weapon-data.js`: 센서별 `antennaHeight` 파라미터 추가
-- [ ] 테스트: 순항미사일(30m) vs LSAM_MFR — 수평선 ~35km 밖에서 미탐지 확인
+- [x] `sensor-model.js`: `updateSensorState()` STEP 0에서 수평선 체크
+- [x] `weapon-data.js`: 센서별 `antennaHeight` 파라미터 추가
+- [x] 테스트: radarHorizon 4개 + 수평선 사전 필터 검증
 
 #### 1.7.3 센서 섹터 + minAltitude 연결
-- [ ] `sensor-model.js`: `updateSensorState()`에서 `isInSector()` 호출 연결
-  - 방위각/고각 섹터 밖 → UNDETECTED 유지
-  - minAltitude 미만 → UNDETECTED 유지
-- [ ] 테스트: GREEN_PINE_B minAltitude=5000m 미만 위협 미탐지 확인
+- [x] `sensor-model.js`: `updateSensorState()` STEP 0에서 `isInSector()` 호출 연결
+- [x] `sensor-model.js`: minAltitude 미만 → UNDETECTED 유지
+- [x] 테스트: GREEN_PINE_B minAltitude=5000m, LSAM_MFR minAltitude=50m 검증
 
 #### 1.7.4 다중 포대 선택 로직
-- [ ] `sim-engine.js`: `_stepEngagement()` 하드코딩 `batteries[0]` → 다중 포대 순회
-  - `selectBattery(threat, batteries, registry)` 함수: 봉투 적합성, 탄약, 부하 기반 선택
-- [ ] `sim-engine.js`: 킬체인 상태에 `assignedShooter` 필드 추가
-- [ ] 테스트: 2개 포대 시나리오에서 적절한 포대 배정 확인
+- [x] `sim-engine.js`: `_selectBattery()` — 봉투 적합 + 탄약 + 부하 기반 포대 선택
+- [x] `sim-engine.js`: 킬체인 상태에 `assignedShooter` 필드 추가
+- [x] `batteries[0]` 하드코딩 제거
 
 #### 1.7.5 위협 타입별 궤적 분기
-- [ ] `sim-engine.js`: `_stepThreats()` SRBM 하드코딩 → 위협 typeId별 분기
-  - 탄도탄: `ballisticTrajectory()` (기존, sin 포물선)
-  - 순항미사일: `cruiseTrajectory()` — 해면밀착 30m + 종말 팝업
-  - 항공기: `aircraftTrajectory()` — 웨이포인트 기반 순항
-- [ ] `physics.js`: `cruiseTrajectory()`, `aircraftTrajectory()` 추가
-- [ ] `entities.js`: ThreatEntity RCS를 하드코딩 `[3.0, 0.1, 0.05]` → registry 조회로 변경
-- [ ] 테스트: 순항미사일 30m 유지, 항공기 8~12km 유지 확인
+- [x] `sim-engine.js`: `_stepThreats()` → threat.typeId별 궤적 분기
+- [x] `physics.js`: `cruiseTrajectory()` 해면밀착 30m + 종말 팝업 + 급강하
+- [x] `physics.js`: `aircraftTrajectory()` 일정 고도 순항
+- [x] `entities.js`: ThreatEntity RCS → registry.getThreatRCS() 조회 (하드코딩 제거)
+- [x] 221개 테스트 전체 통과
 
 ---
 
