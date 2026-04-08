@@ -35,14 +35,14 @@
 - `SimEngine` 클래스: requestAnimationFrame 기반 메인 루프
 - `step(dt)`: 매 프레임 호출, dt는 실시간 초 × 배속
 - step 내부 처리 순서 (EADSIM-Lite):
-  1. 위협 이동 (physics — 탄도/순항/항공기 궤적)
-  2. **센서 상태머신 갱신** (sensor-model — SNR 탐지 + 3단계 전이)
+  1. 위협 이동 (physics — **typeId별 궤적 분기**: 탄도 sin(π×t) / 순항 30m / 항공기 웨이포인트)
+  2. **센서 상태머신 갱신** (sensor-model — 수평선 체크 → 섹터 체크 → SNR 탐지 → 3단계 전이)
   3. **킬체인 진행** (killchain — C2 노드별 트리거→조건→응답)
-  4. **교전 판정** (engagement-model — PSSEK 5단계)
-  5. 요격미사일 유도 (physics — PNG/CLOS 비행)
-  6. **BDA 판정** (engagement-model — kill_radius 도달 + Pk 판정)
+  4. **교전 판정** (engagement-model — PSSEK 5단계, **다중 포대 선택**: selectBattery → selectLauncher)
+  5. 요격미사일 유도 (physics — PNG/CLOS 비행, prevPosition 저장)
+  6. **BDA 판정** (engagement-model — **CCD segment-to-segment** 최근접점 + Pk 판정 + 자폭 처리)
   7. 메트릭 수집 (metrics)
-- 이벤트 버스: 'sensor-state-change', 'killchain-step', 'engagement-start', 'bda-result', 'threat-leaked', 'simulation-end'
+- 이벤트 버스: 'sensor-state-change', 'killchain-step', 'engagement-start', 'bda-result', 'threat-leaked', 'simulation-end', 'interceptor-selfdestructed'
 - 상태: READY → RUNNING → PAUSED → COMPLETE
 - 시뮬레이션 시간: `simTime`, `realTime`, `timeScale`
 
@@ -229,11 +229,14 @@ BatteryEntity {
   shooterTypeId → Registry 참조
   mfrSensorId: string           // 소속 MFR 센서 ID
   ecsC2Id: string               // 소속 ECS C2 ID
-  ammo: { ABM: number, AAM: number }     // 잔여 탄약
+  launchers: [                  // 개별 발사대(TEL) 배열
+    { id, missileType, capacity, remaining }
+  ]
   activeEngagements: number     // 현재 교전 중인 수
   maxSimultaneous: number       // 동시교전 상한 (MFR 제한)
   launchQueue: []               // 발사 대기 큐 (launchInterval 적용)
   bdaPending: Map<interceptorId, { timer: number, threatId: string }>
+  // 발사 시: selectLauncher(missileType) → 잔여 탄 있는 TEL 선택 → fireLauncher(id)
 }
 
 ThreatEntity {
@@ -246,13 +249,14 @@ ThreatEntity {
 }
 
 InterceptorEntity {
-  position, velocity
+  position, velocity, prevPosition  // prevPosition: 연속 충돌 감지(CCD)용
   missileSpeed: number          // weapon-data에서 가져온 속도
   guidanceType: 'PNG' | 'CLOS'  // 천마만 CLOS, 나머지 PNG
   killRadius: number
   targetThreatId: string
   pssekPk: number               // 발사 시점 PSSEK 조회 결과
   fuelRemaining: number
+  launcherId: string            // 발사한 TEL ID
 }
 ```
 
@@ -264,9 +268,16 @@ InterceptorEntity {
 // 매 스캔 주기마다 호출
 updateSensorState(sensor, threat, jamming, dt):
 
+  // 0. 기하학적 사전 필터 (Phase 1.7 보강)
+  //    (a) 레이더 수평선 체크: horizon = sqrt(2*R*h_ant) + sqrt(2*R*h_target)
+  //        수평선 밖 → UNDETECTED 유지, SNR 계산 스킵
+  //    (b) 섹터 체크: isInSector(방위각, 고각, minAltitude)
+  //        섹터 밖 → UNDETECTED 유지
+  //    (c) minAltitude 미만 → UNDETECTED 유지
+
   // 1. SNR 기반 탐지확률 계산 (센서별 RCS_ref 사용)
   d = slantRange(sensor.position, threat.position)
-  rcs = threat.currentRCS  // 비행 단계별 변화
+  rcs = threat.currentRCS  // 비행 단계별 변화 (registry에서 조회)
   R_ref = registry.getSensorRanges(sensor.typeId).detect
   rcs_ref = registry.getRcsRef(sensor.typeId)  // 센서별 기준 RCS
   SNR = (R_ref / d)⁴ × (rcs / rcs_ref)
@@ -350,17 +361,22 @@ onBDAComplete(battery, threat, interceptor):
 ```javascript
 // 매 프레임 요격미사일 갱신
 updateInterceptor(interceptor, threat, dt):
+  interceptor.prevPosition = interceptor.position  // CCD용 이전 위치 저장
   if interceptor.guidanceType === 'PNG':
-    pngGuidance(interceptor, threat, dt, N=3)
+    pngGuidance(interceptor, threat, dt, N=4)
   else if interceptor.guidanceType === 'CLOS':
     closGuidance(interceptor, threat, operator, dt)  // 천마 전용
 
-  distance = slantRange(interceptor.position, threat.position)
-  if distance <= interceptor.killRadius:
+  // 연속 충돌 감지 (CCD): segment-to-segment
+  // 미사일과 위협 모두 이동하므로 두 선분 사이 최소 거리 계산
+  closestDist = closestApproachDistance(
+    interceptor.prevPosition, interceptor.position,
+    threat.prevPosition, threat.position)
+  if closestDist <= interceptor.killRadius:
     // PSSEK 기반 확률 판정
     if random() < interceptor.pssekPk → HIT
-    else → MISS
-  if interceptor.fuelRemaining <= 0 → MISS (연료 소진)
+    else → MISS → 자폭 (화면 제거)
+  if interceptor.fuelRemaining <= 0 → MISS (연료 소진) → 자폭
 ```
 
 ### 2.7 core/killchain.js — Strategy 패턴

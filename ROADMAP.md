@@ -101,20 +101,71 @@
 - [x] 버튼: "위협 발사", "초기화", 재생속도
 - [x] Phase 1 스모크 테스트 (200개 테스트 전체 통과)
 
+### Phase 1 디버깅 (완료)
+> Phase 1.0~1.6 구현 후 통합 실행에서 발견된 3가지 핵심 문제 수정.
+
+- [x] **Bug 1: 사다리꼴 궤적 → 포물선**: `ballisticTrajectory` 고도 계산을 `sin(π×t)`로 교체
+- [x] **Bug 2: MFR/사수 시각적 분리**: LSAM_MFR 좌표 분리 + 네트워크 별도 노드 + MFR↔ECS internal 링크
+- [x] **Bug 3: Pk=0.85 요격 실패**: 연속 충돌 감지(CCD segment-to-segment), 초기 속도 방향 보정, prevPosition 추적
+- [x] **요격 실패 미사일 자폭 처리**: MISS/연료소진/표적소멸 시 즉시 자폭 이벤트 + 화면 제거
+- [x] 211개 테스트 전체 통과
+
+### 1.7 Phase 2 준비 보완 (Phase 2 진입 전 필수)
+> 목표: Phase 1 코어 모듈을 다중 위협·다중 포대·다중 무기체계 확장에 대응하도록 일반화.
+> Phase 2에서 대규모 리팩토링 없이 무기체계/위협 추가가 가능하도록 기반 정비.
+
+#### 1.7.1 발사대(TEL) 개별 모델링
+- [ ] `entities.js`: BatteryEntity를 발사대 배열 구조로 리팩토링
+  - `launchers: [{ id, missileType, capacity, remaining }]`
+  - `fire()` → `fireLauncher(launcherId)` + 발사대 선택 로직
+- [ ] `engagement-model.js`: `selectLauncher(battery, missileType)` 함수 추가
+- [ ] `weapon-data.js`: 기존 `launchers` 메타데이터를 런타임에서 활용
+- [ ] 테스트: 발사대별 탄약 차감, 특정 발사대 소진 시 다른 발사대 자동 선택
+
+#### 1.7.2 레이더 수평선 (지구 곡률 기본 모델)
+- [ ] `physics.js`: `radarHorizon(antennaAltKm, targetAltKm)` 함수 추가
+  - `horizon = sqrt(2×R_earth×h_ant) + sqrt(2×R_earth×h_target)` (EADSIM 표준)
+- [ ] `sensor-model.js`: `updateSensorState()`에서 SNR 계산 전 수평선 체크
+  - 수평선 밖 → UNDETECTED 유지 (SNR 계산 자체를 스킵)
+- [ ] `weapon-data.js`: 센서별 `antennaHeight` 파라미터 추가
+- [ ] 테스트: 순항미사일(30m) vs LSAM_MFR — 수평선 ~35km 밖에서 미탐지 확인
+
+#### 1.7.3 센서 섹터 + minAltitude 연결
+- [ ] `sensor-model.js`: `updateSensorState()`에서 `isInSector()` 호출 연결
+  - 방위각/고각 섹터 밖 → UNDETECTED 유지
+  - minAltitude 미만 → UNDETECTED 유지
+- [ ] 테스트: GREEN_PINE_B minAltitude=5000m 미만 위협 미탐지 확인
+
+#### 1.7.4 다중 포대 선택 로직
+- [ ] `sim-engine.js`: `_stepEngagement()` 하드코딩 `batteries[0]` → 다중 포대 순회
+  - `selectBattery(threat, batteries, registry)` 함수: 봉투 적합성, 탄약, 부하 기반 선택
+- [ ] `sim-engine.js`: 킬체인 상태에 `assignedShooter` 필드 추가
+- [ ] 테스트: 2개 포대 시나리오에서 적절한 포대 배정 확인
+
+#### 1.7.5 위협 타입별 궤적 분기
+- [ ] `sim-engine.js`: `_stepThreats()` SRBM 하드코딩 → 위협 typeId별 분기
+  - 탄도탄: `ballisticTrajectory()` (기존, sin 포물선)
+  - 순항미사일: `cruiseTrajectory()` — 해면밀착 30m + 종말 팝업
+  - 항공기: `aircraftTrajectory()` — 웨이포인트 기반 순항
+- [ ] `physics.js`: `cruiseTrajectory()`, `aircraftTrajectory()` 추가
+- [ ] `entities.js`: ThreatEntity RCS를 하드코딩 `[3.0, 0.1, 0.05]` → registry 조회로 변경
+- [ ] 테스트: 순항미사일 30m 유지, 항공기 8~12km 유지 확인
+
 ---
 
 ## Phase 2: 다중 위협 + PSSEK 다양성 + S-L-S/S-S 교리
 > 목표: 복수 위협, 다양한 PSSEK 조합, BDA 재발사, 동시교전 상한 검증
+> **전제조건**: Phase 1.7 보완 완료 (다중 포대, 위협 궤적 분기, 레이더 수평선, TEL 개별화)
 
 ### 2.1 위협 다양화
-- [ ] CRUISE_MISSILE (해면밀착 30m, RCS 0.01, ±5G 기동, 채프)
-- [ ] AIRCRAFT (고도 8~12km, RCS 5.0, 채프+플레어)
-- [ ] 위협 생성기: 파상 공격 (시간차 다중 위협)
+- [ ] `weapon-data.js`: CRUISE_MISSILE 타입 추가 (해면밀착 30m, RCS 0.01, ±5G 기동, 채프)
+- [ ] `weapon-data.js`: AIRCRAFT 타입 추가 (고도 8~12km, RCS 5.0, 채프+플레어)
+- [ ] 위협 생성기: 파상 공격 (시간차 다중 위협 스케줄러)
 
 ### 2.2 무기체계 확장
-- [ ] PAC-3 MSE 추가 (PSSEK 테이블, S-S 교리, AN/MPQ-65)
-- [ ] 천궁-II 추가 (PSSEK 테이블, MSAM_MFR, 동시교전 10)
-- [ ] 포대 동시교전 상한 구현 (MFR 유도 발수 제한)
+- [ ] `weapon-data.js`: PAC-3 MSE 추가 (PSSEK 테이블, S-S 교리, AN/MPQ-65, 6~8 TEL)
+- [ ] `weapon-data.js`: 천궁-II 추가 (PSSEK 테이블, MSAM_MFR, 동시교전 10, 4~6 TEL)
+- [ ] 다중 포대 시나리오: L-SAM + PAC-3 동시 운용 + 포대 선택 로직 검증
 
 ### 2.3 교전 교리 구현
 - [ ] S-L-S 완전 구현: 1발→BDA 타이머→결과→MISS 시 재발사 판단
@@ -125,6 +176,12 @@
 - [ ] 킬체인 진행 타임라인 (HUD)
 - [ ] 다중 위협 동시 표시
 - [ ] S-S 교리 시 2발 동시 궤적
+
+### 2.5 킬체인 일반화 + 이벤트 보완
+- [ ] `sim-engine.js`: 킬체인 노드명 하드코딩 → topology 기반 일반 순회
+  - 센서 소스 추적 (`threat.detectionSource`), 대체 C2 경로 지원
+- [ ] `event-log.js`: 미발행 이벤트 보완 (BDA_STARTED, AMMO_DEPLETED, SIMULTANEOUS_LIMIT_REACHED)
+- [ ] 이벤트 기반 메트릭 수집 준비 (Phase 3 metrics.js 기반)
 
 ---
 
@@ -182,9 +239,10 @@
 
 ### 5.1 물리 고도화
 - [ ] 극초음속 S자 회피기동
-- [ ] 지형 기반 레이더 수평선 (LOS 차폐)
-- [ ] 밴드별 재밍 상세 모델
-- [ ] 대응수단 상세 (채프/플레어 타이밍)
+- [ ] 지형 기반 LOS 차폐 (DEM 고도 데이터 활용, 산악 차폐 모델링)
+  - ※ 기본 수평선(지구 곡률)은 Phase 1.7에서 구현 완료. Phase 5는 지형 상세화.
+- [ ] 밴드별 재밍 상세 모델 (시커 밴드별 차등: IIR 면역, Ka밴드 취약)
+- [ ] 대응수단 상세 (채프/플레어 타이밍, 디코이)
 
 ### 5.2 통신 모델
 - [ ] 링크별 지연 상세 파라미터
