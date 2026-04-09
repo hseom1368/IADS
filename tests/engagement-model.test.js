@@ -161,6 +161,37 @@ describe('evaluateEngagement', () => {
     }
   });
 
+  it('재밍 보정: 밴드별 감수성 차등 적용 (L밴드 강건, S밴드 취약)', () => {
+    const threat = makeSRBM();
+    threat.position = { lon: 127.0, lat: 37.5, alt: 55000 };
+    const battery = makeBattery();
+
+    // L밴드 센서 (GREEN_PINE_B, jammingSusceptibility=0.3)
+    const sensorL = new SensorEntity('GREEN_PINE_B', { lon: 127.0, lat: 37.0, alt: 150 });
+    sensorL.setTrackState(threat.id, SENSOR_STATE.FIRE_CONTROL);
+
+    // S밴드 센서 (LSAM_MFR, jammingSusceptibility=0.5)
+    const sensorS = makeMFR(threat.id);
+
+    const jammingLevel = 0.8;
+    const resultL = evaluateEngagement(threat, battery, sensorL, registry, 9999, { jammingLevel });
+    const resultS = evaluateEngagement(threat, battery, sensorS, registry, 9999, { jammingLevel });
+
+    if (resultL.result === ENGAGEMENT_RESULT.FIRE && resultS.result === ENGAGEMENT_RESULT.FIRE) {
+      // L밴드(0.3)는 재밍에 강건 → Pk 감소 적음
+      // S밴드(0.5)는 재밍에 더 취약 → Pk 감소 큼
+      expect(resultL.pk).toBeGreaterThan(resultS.pk);
+
+      // 정량 검증: Pk_L = base * (1 - 0.8*0.3), Pk_S = base * (1 - 0.8*0.5)
+      const resultNoJam = evaluateEngagement(threat, battery, sensorS, registry, 9999, { jammingLevel: 0 });
+      if (resultNoJam.result === ENGAGEMENT_RESULT.FIRE) {
+        const basePk = resultNoJam.pk;
+        expect(resultL.pk).toBeCloseTo(basePk * (1 - 0.8 * 0.3), 2);
+        expect(resultS.pk).toBeCloseTo(basePk * (1 - 0.8 * 0.5), 2);
+      }
+    }
+  });
+
   it('Kill Web 보너스: pk × 1.10', () => {
     const threat = makeSRBM();
     threat.position = { lon: 127.0, lat: 37.5, alt: 55000 };

@@ -15,7 +15,7 @@
  */
 import { ballisticTrajectory, cruiseTrajectory, aircraftTrajectory, slantRange, pngGuidance } from './physics.js';
 import { updateSensorState } from './sensor-model.js';
-import { evaluateEngagement, checkInterceptResult, selectMissileType, ENGAGEMENT_RESULT } from './engagement-model.js';
+import { evaluateEngagement, selectMissileType, ENGAGEMENT_RESULT } from './engagement-model.js';
 import { SENSOR_STATE, InterceptorEntity } from './entities.js';
 import { EventLog, EVENT_TYPE } from './event-log.js';
 import { CommChannel } from './comms.js';
@@ -704,13 +704,10 @@ export class SimEngine {
   // ──────────────────────────────────────────────────────────
 
   _stepBDA(dt) {
-    // ── EADSIM-Lite 교전 판정 원칙 ──────────────────────────
+    // ── EADSIM-Lite 교전 판정 원칙 (CLAUDE.md #10, #11) ─────
     // 교전 결과는 발사 시점에 PSSEK Pk로 이미 결정됨 (predeterminedHit).
-    // flyoutTime 경과 시 사전 결정된 결과를 적용.
-    //
-    // CCD(checkInterceptResult)는 시각화 보조 — 교전 결과와 무관.
-    // 미사일이 시각적으로 위협 근처를 지날 때 조기 판정 트리거로만 사용.
-    // PIP 기반 판정이 충분하므로 향후 Phase에서 CCD 제거 가능.
+    // flyoutTime 경과 시(= PIP 도달) 사전 결정된 결과를 적용.
+    // CCD는 BDA 판정에서 완전 분리됨 (Phase 1.8).
     // ──────────────────────────────────────────────────────────
     for (const intc of this.interceptors) {
       if (intc.state === 'detonated' || intc.state === 'missed') continue;
@@ -718,14 +715,12 @@ export class SimEngine {
       const threat = this.threats.find(t => t.id === intc.targetThreatId);
       if (!threat) continue;
 
-      // 주 판정: flyoutTime 경과 (미사일이 PIP에 도달한 시점)
+      // 주 판정: flyoutTime 경과만으로 BDA 트리거 (CLAUDE.md 원칙 #10)
+      // CCD(checkInterceptResult)는 시각화 보조 전용 — BDA 판정에 사용하지 않음
       const flyoutExpired = intc.flyoutTime && intc.elapsedTime >= intc.flyoutTime;
-      // 보조 판정: CCD 시각적 근접 (교전 결과와 무관, 조기 트리거용)
-      const ccdResult = checkInterceptResult(intc, threat);
 
-      // flyout 미경과 + CCD 미감지 → 아직 대기
-      // 단, 위협이 이미 leaked면 flyout 경과 여부와 무관하게 실패
-      if (!flyoutExpired && !ccdResult) {
+      if (!flyoutExpired) {
+        // flyout 미경과: 위협이 이미 leaked/destroyed면 요격 실패
         if (threat.state === 'leaked' || threat.state === 'destroyed') {
           intc.state = 'missed';
           this.eventLog.log(EVENT_TYPE.INTERCEPT_MISS, this.simTime, threat.id, {
@@ -737,10 +732,9 @@ export class SimEngine {
         continue;
       }
 
-      // 발사 시점에 미리 결정된 결과 적용
+      // flyout 경과 → 발사 시점에 미리 결정된 결과 적용
       const hit = intc.predeterminedHit;
-      const distance = ccdResult ? ccdResult.distance :
-        slantRange(intc.position, threat.position) * 1000;
+      const distance = slantRange(intc.position, threat.position) * 1000;
 
       if (hit) {
         intc.state = 'detonated';

@@ -166,8 +166,9 @@ export function evaluateEngagement(threat, battery, mfrSensor, registry, simTime
     return { result: ENGAGEMENT_RESULT.SKIP, missileType, pk: null, pip, launchInfo, reason: 'no_pssek_data' };
   }
 
-  // 재밍 보정
-  pk *= (1 - jammingLevel * 0.5);
+  // 재밍 보정 — 센서 밴드별 감수성 반영 (L밴드 0.3 강건, X밴드 0.8+ 취약)
+  const susceptibility = registry.getJammingSusceptibility(mfrSensor.typeId) ?? 0.5;
+  pk *= (1 - jammingLevel * susceptibility);
   // ECM 보정
   const ecmPenalty = threat.ecmActive ? registry.getEcmFactor(threat.typeId) : 0;
   pk *= (1 - ecmPenalty);
@@ -204,7 +205,12 @@ export function evaluateEngagement(threat, battery, mfrSensor, registry, simTime
 }
 
 /**
- * 요격미사일 도달 판정 (매 프레임 호출)
+ * 요격미사일 도달 판정 (CCD 기반)
+ *
+ * @deprecated 시각화 보조 전용. 교전 판정에 사용 금지.
+ * 교전 결과는 발사 시점 PSSEK Pk로 사전 결정되며(predeterminedHit),
+ * flyoutTime 경과 시 적용됨. 이 함수는 시각화 모듈에서
+ * 근접 이벤트 감지용으로만 사용 가능.
  *
  * 연속 충돌 감지: 이전 위치→현재 위치 선분에서 표적까지 최소 거리 계산.
  * 고속 미사일이 kill_radius를 한 step에 건너뛰는 문제 해결.
