@@ -23,7 +23,9 @@ Cesium 기반 3D 시각화, 단일 HTML+JS 프론트엔드, 백엔드 없음.
 6. **포대-발사대(TEL) 2계층**: 포대 단위 동시교전 상한(MFR) + 발사대 단위 탄약 관리
 7. **밴드별 재밍 감수성**: L밴드(강건) → S → C → X밴드(취약)
 8. **추적 상관 모델**: 오상관/미상관 확률 → 과잉교전/미교전 재현
-9. **연속 충돌 감지(CCD)**: segment-to-segment 최근접점으로 고속 물체 kill radius 건너뜀 방지
+9. **PIP 유효성**: 모든 발사는 PIP가 해당 무기의 교전 봉투 내이고, 미사일 flyout 시간 내에 위협이 PIP에 도달 가능할 때만 승인. PIP 산출은 실제 궤적 함수(sin 포물선 등) 기반.
+10. **교전 결과 사전 결정**: 교전 결과(HIT/MISS)는 발사 시점에 PSSEK Pk로 즉시 결정. 이후 어떤 물리 계산(CCD, kill radius, PNG 유도 등)도 결과를 변경하지 않음.
+11. **시각화는 결과의 연출**: 시각화 모듈은 사전 결정된 교전 결과를 재현. 미사일은 PIP까지 비행 후 결과에 따라 위협과 함께 폭발(HIT) 또는 교차 후 자폭(MISS). 유도 방식별 시각화: hit-to-kill(PIP 직선) / PNG(근접신관) / CLOS(천마 시선 추적).
 
 ## 소프트웨어 설계 원칙
 1. **SSOT**: 모든 무기체계 파라미터는 `src/config/weapon-data.js` 단일 소스
@@ -31,7 +33,7 @@ Cesium 기반 3D 시각화, 단일 HTML+JS 프론트엔드, 백엔드 없음.
 3. **능력(불변) vs 상태(가변) 분리**: weapon-data(Object.freeze) vs entity 인스턴스(탄약/교전큐/센서상태)
 4. **시뮬레이션 ↔ 시각화 분리**: core/ 모듈은 Cesium 무의존. viz/ 가 core 이벤트 구독
 5. **실시간 시뮬레이션**: requestAnimationFrame 기반 프레임 단위
-6. **물리 비행은 시각화용, PSSEK가 결과 결정**: 요격미사일 PNG/CLOS 비행은 시각적 표현, 교전 결과는 PSSEK 확률 판정
+6. **PSSEK가 결과 결정, 물리 비행은 시각화 연출**: 교전 결과는 발사 시점 PSSEK 확률로 즉시 결정(predeterminedHit). 요격미사일 비행(hit-to-kill/PNG/CLOS)은 결정된 결과를 시각적으로 재현. CCD는 시각화 보조(향후 제거 가능).
 7. **점진적 확장**: Phase별 기능 추가, 각 Phase 독립 실행 가능
 8. **typeId 기반 일반화**: sim-engine 내 하드코딩 금지. 무기체계/위협/C2 노드는 typeId + registry 조회로 처리. weapon-data에 타입 추가만으로 새 체계 지원
 9. **다중 포대·다중 위협**: 교전 로직은 단일 포대/단일 위협 가정 금지. selectBattery() + selectLauncher()로 최적 자산 배정
@@ -45,6 +47,8 @@ Cesium 기반 3D 시각화, 단일 HTML+JS 프론트엔드, 백엔드 없음.
 - 속도: m/s (내부), weapon-data에서 Mach→m/s 변환
 - 클래스: PascalCase, 함수: camelCase, 상수: UPPER_SNAKE_CASE
 - JSDoc 필수: 모든 public 메서드
+- **교차 참조 검증**: 핵심 함수(physics, engagement-model) 시그니처/동작 변경 시 `grep -r "함수명" src/ tests/`로 모든 호출처를 동일 커밋에서 갱신
+- **최종 소비자 확인**: index.html은 core 모듈의 최종 소비자 — 엔티티 생성자 파라미터 변경 시 반드시 index.html 호출부 확인
 
 ## 파일 수정 시 금지사항
 - `docs/` 참조 문서 직접 수정 금지
@@ -79,6 +83,9 @@ Cesium 기반 3D 시각화, 단일 HTML+JS 프론트엔드, 백엔드 없음.
 - **PSSEK 조회 테스트**: 무기-위협-거리-접근각 조합별 정확한 Pk 반환 확인
 - **센서 상태 전이 테스트**: 3단계 전이 시간, 3회 연속 실패 시 추적 상실
 - **BDA 타이머 테스트**: S-L-S에서 BDA 지연 후 재발사 판단
+- **통합 테스트**: 이벤트 순서뿐 아니라 물리 상태 검증 필수 (미사일 PIP 도달 여부, 위협 위치 정합성)
+- **시간 인과율 검증**: HIT 이벤트는 LEAKED보다 반드시 먼저 발생해야 함
+- **PIP 정합성 테스트**: predictInterceptPoint와 실제 궤적 함수(ballisticTrajectory 등)가 동일 궤적 사용하는지 확인
 
 ## 커밋 메시지 규칙
 ```
@@ -104,7 +111,7 @@ scope: core|viz|config|test
 6. ~~무제한 동시교전~~ → **MFR 동시유도 상한**
 7. ~~포대 집계 탄약~~ → **발사대(TEL) 개별 탄약 관리**
 8. ~~단일 재밍 계수~~ → **밴드별 감수성** (L/S/C/X)
-9. ~~요격미사일 없음~~ → PNG/CLOS 물리 비행 + **CCD segment-to-segment** 판정
+9. ~~요격미사일 없음~~ → 유도방식별 비행 시각화 (hit-to-kill/PNG/CLOS) + **PSSEK 사전 판정**
 10. ~~6개 메트릭~~ → **EADSIM MOE/MOP 10개**
 
 ## C2 지휘통제 구조 (핵심 참조)

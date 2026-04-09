@@ -704,19 +704,23 @@ export class SimEngine {
   // ──────────────────────────────────────────────────────────
 
   _stepBDA(dt) {
-    // EADSIM-Lite 판정:
-    // 결과는 발사 시점에 이미 결정됨 (predeterminedHit).
-    // flyoutTime 경과 시 결과 적용. CCD는 시각적 충돌 감지 보조.
-    // 위협이 이미 leaked면 → 요격 실패 (너무 늦음)
+    // ── EADSIM-Lite 교전 판정 원칙 ──────────────────────────
+    // 교전 결과는 발사 시점에 PSSEK Pk로 이미 결정됨 (predeterminedHit).
+    // flyoutTime 경과 시 사전 결정된 결과를 적용.
+    //
+    // CCD(checkInterceptResult)는 시각화 보조 — 교전 결과와 무관.
+    // 미사일이 시각적으로 위협 근처를 지날 때 조기 판정 트리거로만 사용.
+    // PIP 기반 판정이 충분하므로 향후 Phase에서 CCD 제거 가능.
+    // ──────────────────────────────────────────────────────────
     for (const intc of this.interceptors) {
       if (intc.state === 'detonated' || intc.state === 'missed') continue;
 
       const threat = this.threats.find(t => t.id === intc.targetThreatId);
       if (!threat) continue;
 
-      // flyoutTime 경과 확인 (발사 후 예상 비행시간 도달)
+      // 주 판정: flyoutTime 경과 (미사일이 PIP에 도달한 시점)
       const flyoutExpired = intc.flyoutTime && intc.elapsedTime >= intc.flyoutTime;
-      // CCD 보조 체크 (물리적으로 근접한 경우)
+      // 보조 판정: CCD 시각적 근접 (교전 결과와 무관, 조기 트리거용)
       const ccdResult = checkInterceptResult(intc, threat);
 
       // flyout 미경과 + CCD 미감지 → 아직 대기
