@@ -65,8 +65,6 @@ export class EngagementViz {
       color: color,
       scaleByDistance: new Cesium.NearFarScalar(5e3, 1.5, 5e6, 0.3),
       translucencyByDistance: new Cesium.NearFarScalar(5e3, 1.0, 8e6, 0.1),
-      // Cesium scene.pick()이 반환하는 메타데이터
-      id: { kind: 'threat', threatId, typeId, name },
     });
 
     const trail = this.trailLines.add({
@@ -78,6 +76,7 @@ export class EngagementViz {
       }),
     });
 
+    // 라벨: 이름 + 고도 + Mach (updateThreat에서 실시간 갱신)
     const label = this.labels.add({
       position: pos,
       text: name,
@@ -86,26 +85,37 @@ export class EngagementViz {
       outlineColor: Cesium.Color.BLACK,
       outlineWidth: 2,
       style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-      pixelOffset: new Cesium.Cartesian2(0, -17),
+      pixelOffset: new Cesium.Cartesian2(12, -4),
+      horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+      verticalOrigin: Cesium.VerticalOrigin.CENTER,
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 300000),
+      distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2e6),
+      scale: 1.0,
     });
 
-    this.threatViz.set(threatId, { point, trail, positions: [pos], label });
+    this.threatViz.set(threatId, { point, trail, positions: [pos], label, name, color });
   }
 
   /**
-   * 위협 위치 갱신
+   * 위협 위치 + 상시 라벨 갱신
    * @param {string} threatId
    * @param {{ lon: number, lat: number, alt: number }} position
+   * @param {{ speed?: number, altKm?: number }} [meta] - 없으면 라벨 텍스트는 기존 값 유지
    */
-  updateThreat(threatId, position) {
+  updateThreat(threatId, position, meta) {
     const viz = this.threatViz.get(threatId);
     if (!viz) return;
 
     const pos = Cesium.Cartesian3.fromDegrees(position.lon, position.lat, position.alt);
     viz.point.position = pos;
     viz.label.position = pos;
+
+    // 라벨 텍스트: 이름 + 고도(km) + Mach (3줄)
+    if (meta) {
+      const altKm = meta.altKm ?? (position.alt / 1000);
+      const mach = meta.speed !== undefined ? meta.speed / 340 : 0;
+      viz.label.text = `${viz.name}\n${altKm.toFixed(0)} km\nM ${mach.toFixed(1)}`;
+    }
 
     // 궤적 링 버퍼 (최소 거리 필터)
     const lastPos = viz.positions[viz.positions.length - 1];

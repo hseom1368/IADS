@@ -20,15 +20,16 @@
   .gn{color:#00ff88;font-weight:bold;} .rd{color:#ff4444;font-weight:bold;}
   .yl{color:#ffcc00;font-weight:bold;} .bl{color:#44aaff;font-weight:bold;}
 
-  #rightPanel{position:absolute;top:12px;right:12px;width:175px;font-family:'Share Tech Mono',monospace;z-index:100;}
-  .rbox{background:rgba(0,4,2,0.91);border:1px solid rgba(0,255,136,0.28);padding:10px 13px;margin-bottom:5px;}
-  .rbox h3{font-family:'Orbitron',sans-serif;font-size:7px;letter-spacing:2px;color:#00ff88;
-    margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid rgba(0,255,136,0.15);}
-  .cr{margin-bottom:7px;}
   .cl{font-size:8px;color:rgba(0,255,136,0.55);display:flex;justify-content:space-between;margin-bottom:3px;}
-  input[type=range]{width:100%;accent-color:#00ff88;height:3px;}
+  input[type=range]{accent-color:#00ff88;height:3px;}
 
-  #controls{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);display:flex;gap:6px;z-index:100;}
+  #controls{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);
+    display:flex;gap:8px;align-items:center;z-index:100;
+    background:rgba(0,4,2,0.93);border:1px solid rgba(0,255,136,0.3);
+    padding:8px 12px;}
+  #controls .slider-group{display:flex;flex-direction:column;min-width:100px;}
+  #controls .slider-group input[type=range]{width:100px;}
+  #controls .divider{width:1px;height:26px;background:rgba(0,255,136,0.18);margin:0 2px;}
   .btn{background:rgba(0,4,2,0.93);border:1px solid rgba(0,255,136,0.38);color:#00ff88;
     font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;
     padding:7px 11px;cursor:pointer;transition:all 0.18s;}
@@ -51,22 +52,18 @@
 <!-- HUD (hud.js가 innerHTML 덮어씀) -->
 <div id="hud"></div>
 
-<!-- 우측 패널 -->
-<div id="rightPanel">
-  <div class="rbox">
-    <h3>&#x25B8; CONTROLS</h3>
-    <div class="cr">
-      <div class="cl"><span>Sim Speed</span><span class="yl" id="spdLbl">1x</span></div>
-      <input type="range" id="spdSlider" min="1" max="16" value="1">
-    </div>
-    <div class="cr">
-      <div class="cl"><span>Operator Skill</span><span class="gn" id="skillLbl">HIGH</span></div>
-      <input type="range" id="skillSlider" min="0" max="2" value="0">
-    </div>
-  </div>
-</div>
+<!-- 우측: Threat Tracking Panel (threat-tracking-panel.js가 생성) -->
 
 <div id="controls">
+  <div class="slider-group">
+    <div class="cl"><span>Sim Speed</span><span class="yl" id="spdLbl">1x</span></div>
+    <input type="range" id="spdSlider" min="1" max="16" value="1">
+  </div>
+  <div class="slider-group">
+    <div class="cl"><span>Operator Skill</span><span class="gn" id="skillLbl">HIGH</span></div>
+    <input type="range" id="skillSlider" min="0" max="2" value="0">
+  </div>
+  <div class="divider"></div>
   <button class="btn r" id="btnStart">&#x26A0; SRBM LAUNCH</button>
   <button class="btn" id="btnPause">&#x23F8; PAUSE</button>
   <button class="btn" id="btnReset">&#x25A0; RESET</button>
@@ -81,7 +78,7 @@ import { RadarViz } from './src/viz/radar-viz.js';
 import { NetworkViz } from './src/viz/network-viz.js';
 import { EngagementViz } from './src/viz/engagement-viz.js';
 import { HUD } from './src/viz/hud.js';
-import { ThreatInfoPanel } from './src/viz/threat-info-panel.js';
+import { ThreatTrackingPanel } from './src/viz/threat-tracking-panel.js';
 
 import { Registry } from './src/core/registry.js';
 import { SimEngine, SIM_STATE } from './src/core/sim-engine.js';
@@ -97,16 +94,7 @@ const radarViz = new RadarViz(viewer);
 const networkViz = new NetworkViz(viewer);
 const engagementViz = new EngagementViz(viewer);
 const hud = new HUD();
-const threatInfoPanel = new ThreatInfoPanel();
-
-// ── 위협 클릭 픽킹 → 정보 패널 토글 ──────────────────────
-const clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
-clickHandler.setInputAction((movement) => {
-  const picked = viewer.scene.pick(movement.position);
-  if (picked && picked.id && picked.id.kind === 'threat') {
-    if (engine) threatInfoPanel.open(picked.id.threatId, engine);
-  }
-}, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+const trackingPanel = new ThreatTrackingPanel();
 
 // ═══════════════════════════════════════════════════════════
 //  POSITIONS (Phase 1 배치)
@@ -159,7 +147,9 @@ function createEngine() {
 
   // ── 이벤트 → VIZ 연결 ──────────────────────────────────
   engine.on('threat-spawned', ({ threat }) => {
-    engagementViz.addThreat(threat.id, threat.typeId, `BM-${threat.id.slice(-3)}`, threat.position);
+    const displayName = `BM-${threat.id.slice(-3)}`;
+    engagementViz.addThreat(threat.id, threat.typeId, displayName, threat.position);
+    trackingPanel.onThreatSpawned(threat, displayName);
     hud.addLog(`SRBM LAUNCHED: ${threat.id}`, '#ff4444');
     showAlert('THREAT DETECTED');
   });
@@ -199,6 +189,7 @@ function createEngine() {
       engagementViz.explode(explodePos, true);
       engagementViz.removeThreat(threat.id);
       engagementViz.removeInterceptor(interceptor.id);
+      trackingPanel.onThreatTerminated(threat.id, 'hit');
       hud.addLog(`HIT: ${threat.id} intercepted! (hit-to-kill at PIP)`, '#00ff88');
     } else {
       engagementViz.explode(interceptor.pipPosition || interceptor.position, true);
@@ -219,6 +210,7 @@ function createEngine() {
     leaks++;
     engagementViz.explode(threat.position, false);
     engagementViz.removeThreat(threat.id);
+    trackingPanel.onThreatTerminated(threat.id, 'leak');
     hud.addLog(`LEAKED: ${threat.id} impact!`, '#ff0000');
   });
 
@@ -276,10 +268,13 @@ function loop(timestamp) {
   if (engine && engine.state === SIM_STATE.RUNNING) {
     engine.step(dt);
 
-    // 위협/요격미사일 위치 갱신
+    // 위협/요격미사일 위치 갱신 (라벨 상시: 고도 km + Mach)
     for (const threat of engine.threats) {
       if (threat.state !== 'intercepted' && threat.state !== 'leaked') {
-        engagementViz.updateThreat(threat.id, threat.position);
+        engagementViz.updateThreat(threat.id, threat.position, {
+          speed: threat.currentSpeed,
+          altKm: threat.position.alt / 1000,
+        });
       }
     }
     for (const intc of engine.interceptors) {
@@ -294,8 +289,8 @@ function loop(timestamp) {
     const active = engine.threats.filter(t => t.state !== 'intercepted' && t.state !== 'leaked').length;
     hud.updateThreats(active, engine.threats.length);
 
-    // 위협 정보 패널 실시간 갱신 (열려 있을 때만)
-    threatInfoPanel.updateLive(engine);
+    // Threat Tracking 패널 실시간 갱신 (목록 라이브값 + 그래프)
+    trackingPanel.updateLive(engine);
     if (bat) {
       hud.updateBattery({
         launchers: bat.launchers,
@@ -351,7 +346,7 @@ document.getElementById('btnReset').addEventListener('click', () => {
   if (engine) {
     engine.reset();
     hits = 0; leaks = 0;
-    threatInfoPanel.close();
+    trackingPanel.reset();
     // viz는 새로 생성하지 않음 (레이더/네트워크는 유지)
     engagementViz.destroy();
     // 재생성
