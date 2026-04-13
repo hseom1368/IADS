@@ -207,33 +207,82 @@
 
 ## Phase 2: 다중 위협 + PSSEK 다양성 + S-L-S/S-S 교리
 > 목표: 복수 위협, 다양한 PSSEK 조합, BDA 재발사, 동시교전 상한 검증
-> **전제조건**: Phase 1.7 보완 완료 (다중 포대, 위협 궤적 분기, 레이더 수평선, TEL 개별화)
+> **전제조건**: Phase 1.7 보완 완료 (다중 포대, 위협 궤적 분기, 레이더 수평선, TEL 개별화) ✅
+> 작업 명세서: `docs/tasks/phase2-multi-threat.md`
+> 권장 순서: 2.5(선행 일반화) → 2.1 → 2.2 → 2.3 → 2.4 → 2.x(스모크)
+
+### 2.5 킬체인 일반화 + 이벤트 보완 (선행)
+> Phase 2의 모든 하위 작업이 의존하는 토대. **먼저 수행.**
+
+- [ ] `src/core/killchain.js` 신규: `LinearKillchainStrategy`
+  - topology 엣지 순회 기반 `step()` (`KAMD_OPS/ICC/ECS` 문자열 분기 제거)
+  - 노드 상태: PENDING → TRANSIT(링크) → QUEUED → PROCESSING → DONE
+- [ ] `sim-engine._stepKillchain()` → strategy 위임으로 축소
+- [ ] `threat.detectionSource` 필드 추가: 최초 탐지 센서 기록
+  - 킬체인 시작 조건을 `GREEN_PINE_B` 하드코딩에서 토폴로지 시작 노드 일치로 변경
+- [ ] 미발행 이벤트 발행:
+  - `BDA_STARTED` — `startBDA()` 직후
+  - `AMMO_DEPLETED` — `fire()` 성공 후 launcher.remaining === 0
+  - `SIMULTANEOUS_LIMIT_REACHED` — `capacity_or_ammo` WAIT 발생 시
+- [ ] `tests/killchain.test.js` 신규 (2-노드 직결 + 5-노드 Phase 1 동일 동작)
+- [ ] 기존 Phase 1 스모크 테스트 무변경 통과
 
 ### 2.1 위협 다양화
-- [ ] `weapon-data.js`: CRUISE_MISSILE 타입 추가 (해면밀착 30m, RCS 0.01, ±5G 기동, 채프)
-- [ ] `weapon-data.js`: AIRCRAFT 타입 추가 (고도 8~12km, RCS 5.0, 채프+플레어)
-- [ ] 위협 생성기: 파상 공격 (시간차 다중 위협 스케줄러)
+- [ ] `weapon-data.js`: `CRUISE_MISSILE` 타입 추가
+  - baseSpeed 272 m/s(Mach 0.8), 해면밀착 30m 프로파일, RCS 0.01, ecmFactor 0.15(채프)
+  - `flightProfile.phases` 3단계(순항/팝업/급강하) — `cruiseTrajectory()`와 정합
+- [ ] `weapon-data.js`: `AIRCRAFT` 타입 추가
+  - baseSpeed 340 m/s(Mach 1), 고도 10km, RCS 5.0, ecmFactor 0.20(채프+플레어)
+  - `flightProfile.phases` 1단계(일정 고도) — `aircraftTrajectory()`와 정합
+- [ ] `src/core/threat-scheduler.js` 신규: 파상 공격 스케줄러
+  - `waves = [{ t, typeId, startPos, targetPos, count, interval }]`
+  - `update(simTime)` → `engine.addThreat()`
+- [ ] `sim-engine.step()` 에 `scheduler?.update(simTime)` 훅 추가
+- [ ] `tests/threat-scheduler.test.js` (wave 시간 경계, count×interval)
+- [ ] index.html: "파상 공격" 버튼 (SRBM×2 + CRUISE×3 + AIRCRAFT×2)
 
 ### 2.2 무기체계 확장
-- [ ] `weapon-data.js`: PAC-3 MSE 추가 (PSSEK 테이블, S-S 교리, AN/MPQ-65, 6~8 TEL)
-- [ ] `weapon-data.js`: 천궁-II 추가 (PSSEK 테이블, MSAM_MFR, 동시교전 10, 4~6 TEL)
-- [ ] 다중 포대 시나리오: L-SAM + PAC-3 동시 운용 + 포대 선택 로직 검증
+- [ ] 센서 추가 (`SENSOR_TYPES`):
+  - `MSAM_MFR` (X밴드 AESA, 100km/80km/60km, 동시교전 10, minAlt 30m)
+  - `PATRIOT_RADAR` (C밴드, 180km/150km/100km, 동시유도 9, 섹터 90°)
+- [ ] 사수 추가 (`SHOOTER_TYPES`):
+  - `PAC3`: 봉투 3~60km, missileSpeed 1530, **doctrine: 'SS'**(SRBM 대응), bdaDelay 5
+  - `CHEONGUNG2`: ABM + AAM 2종 탄, missileSpeed 1700, doctrine SLS, bdaDelay 8
+- [ ] PSSEK 테이블 입력 (weapon-specs.md 섹션 2 표 기반)
+- [ ] `battery.launchers` + `roundsPerLauncher` 설정 (PAC-3: 6 TEL×12발, 천궁-II: 4 TEL×8발)
+- [ ] `_selectBattery()` 개선: 봉투 하드 필터 + PSSEK 최대 Pk 점수 곱
+- [ ] `tests/sim-engine.test.js` 확장: 거리/위협 타입별 포대 선택 검증
+- [ ] index.html 배치: PAC3_BAT(남부), MSAM2_BAT(동부) + viz(레이더 볼륨, 네트워크 노드)
 
 ### 2.3 교전 교리 구현
-- [ ] S-L-S 완전 구현: 1발→BDA 타이머→결과→MISS 시 재발사 판단
-- [ ] S-S 구현: SRBM에 PAC-3 2발 동시, P=1-(1-Pk)²
-- [ ] 다층 핸드오프: 동일 유형 재교전 방지, 다른 유형 허용
+- [ ] **S-L-S 완전 검증** (이미 동작, 테스트 명시화)
+  - `tests/engagement-sls.test.js`: 1발 MISS → BDA → 재발사 → HIT 시나리오
+  - 재발사 시 새 PIP 산출 + 봉투 밖이면 SKIP 확인
+- [ ] **S-S 구현** (PAC-3의 SRBM 대응)
+  - `evaluateEngagement()` 반환에 `shotsToFire` 추가 (SLS=1, SS=2)
+  - `_stepEngagement()`: `shotsToFire === 2` 시 2발 생성
+    - 각자 독립 `predeterminedHit` (Math.random 각각) → 하나라도 HIT이면 격추
+    - `launchInterval`(3s) 오프셋으로 시각화 분리
+  - 이론 복합 Pk = 1 - (1 - pk)² 는 통계 검증용 (`calculateSSPk` 이미 존재)
+- [ ] **다층 핸드오프**
+  - `killchainState.exhaustedShooters[]` 필드 추가
+  - MISS + 재교전 불가(봉투 밖/탄약 소진) 시 해당 사수 exhausted 등록
+  - `_selectBattery()`는 exhausted 제외 후 다른 포대 재선정
+  - `tests/handoff.test.js`: L-SAM MISS → PAC-3 후속 교전
 
 ### 2.4 시각화 확장
-- [ ] 킬체인 진행 타임라인 (HUD)
-- [ ] 다중 위협 동시 표시
-- [ ] S-S 교리 시 2발 동시 궤적
+- [ ] `hud.js`: 위협별 킬체인 타임라인 바 (노드 처리 시간 시각화)
+- [ ] `engagement-viz.js`: 위협 타입별 색상 (SRBM 빨강 / CM 주황 / 항공기 흰색)
+- [ ] 레이블 포맷에 위협 타입 표시 (`BM-007 | 15km | M2.1`)
+- [ ] S-S 2발 궤적: 개별 ID로 addInterceptor 호출 → 독립 궤적 확인
+- [ ] 파상 공격 시 다중 타임라인 동시 표시(최대 5개)
 
-### 2.5 킬체인 일반화 + 이벤트 보완
-- [ ] `sim-engine.js`: 킬체인 노드명 하드코딩 → topology 기반 일반 순회
-  - 센서 소스 추적 (`threat.detectionSource`), 대체 C2 경로 지원
-- [ ] `event-log.js`: 미발행 이벤트 보완 (BDA_STARTED, AMMO_DEPLETED, SIMULTANEOUS_LIMIT_REACHED)
-- [ ] 이벤트 기반 메트릭 수집 준비 (Phase 3 metrics.js 기반)
+### 2.x Phase 2 회귀 + 스모크
+- [ ] `tests/smoke-phase2.test.js` 신규 — 파상 공격 E2E
+  - 이벤트: THREAT_SPAWNED×7, ENGAGEMENT_FIRED(≥5), BDA_STARTED, INTERCEPT_HIT
+  - 3개 포대 중 최소 2개가 발사
+  - PRA ≥ 0.6 (예비)
+- [ ] 전체 테스트 통과 (목표: **280+개**)
 
 ---
 
