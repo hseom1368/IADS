@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>KIDA ADSIM v2.0 — EADSIM-Lite</title>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body,#cesiumContainer{width:100%;height:100%;overflow:hidden;}
+  .cesium-viewer-bottom{display:none!important;}
+
+  #hud{position:absolute;top:12px;left:12px;width:240px;font-family:'Share Tech Mono',monospace;z-index:100;}
+  .hbox{background:rgba(0,4,2,0.91);border:1px solid rgba(0,255,136,0.28);padding:10px 13px;margin-bottom:5px;}
+  .hbox h3{font-family:'Orbitron',sans-serif;font-size:7px;letter-spacing:3px;color:#00ff88;
+    margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid rgba(0,255,136,0.15);}
+  .row{display:flex;justify-content:space-between;font-size:9px;margin-bottom:4px;}
+  .lbl{color:rgba(0,255,136,0.5);}
+  .gn{color:#00ff88;font-weight:bold;} .rd{color:#ff4444;font-weight:bold;}
+  .yl{color:#ffcc00;font-weight:bold;} .bl{color:#44aaff;font-weight:bold;}
+
+  .cl{font-size:8px;color:rgba(0,255,136,0.55);display:flex;justify-content:space-between;margin-bottom:3px;}
+  input[type=range]{accent-color:#00ff88;height:3px;}
+
+  #controls{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);
+    display:flex;gap:8px;align-items:center;z-index:100;
+    background:rgba(0,4,2,0.93);border:1px solid rgba(0,255,136,0.3);
+    padding:8px 12px;}
+  #controls .slider-group{display:flex;flex-direction:column;min-width:100px;}
+  #controls .slider-group input[type=range]{width:100px;}
+  #controls .divider{width:1px;height:26px;background:rgba(0,255,136,0.18);margin:0 2px;}
+  .btn{background:rgba(0,4,2,0.93);border:1px solid rgba(0,255,136,0.38);color:#00ff88;
+    font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;
+    padding:7px 11px;cursor:pointer;transition:all 0.18s;}
+  .btn:hover{background:rgba(0,255,136,0.1);box-shadow:0 0 8px rgba(0,255,136,0.2);}
+  .btn.r{border-color:rgba(255,68,68,0.38);color:#ff4444;}
+  .btn.r:hover{background:rgba(255,68,68,0.08);}
+
+  #alert{position:absolute;top:12px;left:50%;transform:translateX(-50%);
+    background:rgba(255,0,0,0.1);border:1px solid #ff4444;color:#ff4444;
+    font-family:'Orbitron',sans-serif;font-size:9px;letter-spacing:2px;
+    padding:5px 18px;display:none;z-index:200;pointer-events:none;
+    animation:ap 0.5s infinite;white-space:nowrap;}
+  @keyframes ap{0%,100%{opacity:1}50%{opacity:0.18}}
+</style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+<div id="alert"></div>
+
+<!-- HUD (hud.js가 innerHTML 덮어씀) -->
+<div id="hud"></div>
+
+<!-- 우측: Threat Tracking Panel (threat-tracking-panel.js가 생성) -->
+
+<div id="controls">
+  <div class="slider-group">
+    <div class="cl"><span>Sim Speed</span><span class="yl" id="spdLbl">1x</span></div>
+    <input type="range" id="spdSlider" min="1" max="16" value="1">
+  </div>
+  <div class="slider-group">
+    <div class="cl"><span>Operator Skill</span><span class="gn" id="skillLbl">HIGH</span></div>
+    <input type="range" id="skillSlider" min="0" max="2" value="0">
+  </div>
+  <div class="divider"></div>
+  <button class="btn r" id="btnStart">&#x26A0; SRBM LAUNCH</button>
+  <button class="btn" id="btnPause">&#x23F8; PAUSE</button>
+  <button class="btn" id="btnReset">&#x25A0; RESET</button>
+</div>
+
+<script type="module">
+// ═══════════════════════════════════════════════════════════
+//  IMPORTS
+// ═══════════════════════════════════════════════════════════
+import { createViewer, cameraKoreaOverview } from './src/viz/cesium-app.js';
+import { RadarViz } from './src/viz/radar-viz.js';
+import { NetworkViz } from './src/viz/network-viz.js';
+import { EngagementViz } from './src/viz/engagement-viz.js';
+import { HUD } from './src/viz/hud.js';
+import { ThreatTrackingPanel } from './src/viz/threat-tracking-panel.js';
+
+import { Registry } from './src/core/registry.js';
+import { SimEngine, SIM_STATE } from './src/core/sim-engine.js';
+import { SensorEntity, C2Entity, BatteryEntity, ThreatEntity } from './src/core/entities.js';
+
+// ═══════════════════════════════════════════════════════════
+//  CESIUM + VIZ INIT
+// ═══════════════════════════════════════════════════════════
+const TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI3YTIzMzUyNi1iMzc4LTRhNzAtOTZkMi1kNjBjYWYwMTA0NDAiLCJpZCI6NDEzNTM4LCJpYXQiOjE3NzUyNjQ0MTJ9.qSkagM1v-8HG9ACbqK_ODu52FJ6g9Eb1l0qlvpZvI9Q';
+
+const viewer = createViewer('cesiumContainer', TOKEN);
+const radarViz = new RadarViz(viewer);
+const networkViz = new NetworkViz(viewer);
+const engagementViz = new EngagementViz(viewer);
+const hud = new HUD();
+const trackingPanel = new ThreatTrackingPanel();
+
+// ═══════════════════════════════════════════════════════════
+//  POSITIONS (Phase 1 배치)
+// ═══════════════════════════════════════════════════════════
+const POS = {
+  GREEN_PINE: { lon: 127.0, lat: 36.0, alt: 200 },    // 충남 (조기경보)
+  KAMD_OPS:   { lon: 127.0, lat: 36.8, alt: 100 },    // 오산
+  ICC:        { lon: 127.05, lat: 37.05, alt: 100 },   // 전방 대대
+  ECS:        { lon: 127.03, lat: 37.08, alt: 100 },   // 포대 ECS
+  LSAM_MFR:   { lon: 127.04, lat: 37.12, alt: 180 },   // L-SAM MFR (포대 북동 ~1km)
+  LSAM_BAT:   { lon: 127.03, lat: 37.1, alt: 150 },   // L-SAM 포대 중심
+  // 발사대(TEL) 4대 개별 배치 (포대 중심 주변 ~200m 간격)
+  TEL_ABM1:   { lon: 127.028, lat: 37.099, alt: 150 },  // ABM 발사대 1
+  TEL_ABM2:   { lon: 127.032, lat: 37.099, alt: 150 },  // ABM 발사대 2
+  TEL_AAM1:   { lon: 127.028, lat: 37.101, alt: 150 },  // AAM 발사대 1
+  TEL_AAM2:   { lon: 127.032, lat: 37.101, alt: 150 },  // AAM 발사대 2
+  SRBM_ORIGIN: { lon: 127.0, lat: 39.5, alt: 0 },     // 북방 발사원점
+  SRBM_TARGET: { lon: 127.03, lat: 37.0, alt: 0 },    // 수도권 표적
+};
+
+// ═══════════════════════════════════════════════════════════
+//  SIM ENGINE SETUP
+// ═══════════════════════════════════════════════════════════
+const registry = new Registry();
+let engine = null;
+let animFrameId = null;
+let hits = 0, leaks = 0;
+
+const SKILLS = ['high', 'mid', 'low'];
+let currentSkill = 'high';
+
+function createEngine() {
+  engine = new SimEngine(registry, { operatorSkill: currentSkill });
+
+  // 센서
+  const gp = new SensorEntity('GREEN_PINE_B', POS.GREEN_PINE);
+  const mfr = new SensorEntity('LSAM_MFR', POS.LSAM_MFR);
+  engine.addSensor(gp);
+  engine.addSensor(mfr);
+
+  // C2
+  engine.addC2(new C2Entity('KAMD_OPS', POS.KAMD_OPS, currentSkill));
+  engine.addC2(new C2Entity('ICC', POS.ICC, currentSkill));
+  engine.addC2(new C2Entity('ECS', POS.ECS, currentSkill));
+
+  // 포대
+  const batConfig = registry.getBatteryConfig('LSAM');
+  const bat = new BatteryEntity('LSAM', POS.LSAM_BAT, mfr.id, 'ecs_1', { ABM: 12, AAM: 12 }, 10, batConfig);
+  engine.addBattery(bat);
+
+  // ── 이벤트 → VIZ 연결 ──────────────────────────────────
+  engine.on('threat-spawned', ({ threat }) => {
+    const displayName = `BM-${threat.id.slice(-3)}`;
+    engagementViz.addThreat(threat.id, threat.typeId, displayName, threat.position);
+    trackingPanel.onThreatSpawned(threat, displayName);
+    hud.addLog(`SRBM LAUNCHED: ${threat.id}`, '#ff4444');
+    showAlert('THREAT DETECTED');
+  });
+
+  engine.on('sensor-state-change', ({ sensor, threat, state, event }) => {
+    radarViz.updateSensorState(sensor.id, state);
+    if (event === 'SENSOR_DETECTED') {
+      hud.addLog(`${sensor.typeId}: DETECTED ${threat.id}`, '#ffcc00');
+    } else if (event === 'SENSOR_FIRE_CONTROL') {
+      hud.addLog(`${sensor.typeId}: FIRE CONTROL ${threat.id}`, '#00ff88');
+    }
+  });
+
+  engine.on('killchain-step', ({ threat, stage }) => {
+    hud.updateKillchain(threat.id, stage);
+    // 링크 애니메이션
+    const linkMap = {
+      'GP_DETECTED': ['GREEN_PINE_B', 'KAMD_OPS'],
+      'KAMD_DONE': ['KAMD_OPS', 'ICC'],
+      'ICC_DONE': ['ICC', 'ECS'],
+      'ECS_DONE': ['ECS', 'LSAM'],
+    };
+    const link = linkMap[stage];
+    if (link) networkViz.activateLink(link[0], link[1], 2);
+  });
+
+  engine.on('engagement-fired', ({ threat, interceptor, pk }) => {
+    engagementViz.addInterceptor(interceptor.id, interceptor.position);
+    hud.addLog(`FIRED ABM at ${threat.id} (Pk=${(pk*100).toFixed(0)}%)`, '#00ff88');
+  });
+
+  engine.on('bda-result', ({ threat, interceptor, hit }) => {
+    if (hit) {
+      hits++;
+      // hit-to-kill: 요격미사일 위치(PIP 근처)에서 폭발 표시
+      const explodePos = interceptor.pipPosition || interceptor.position;
+      engagementViz.explode(explodePos, true);
+      engagementViz.removeThreat(threat.id);
+      engagementViz.removeInterceptor(interceptor.id);
+      trackingPanel.onThreatTerminated(threat.id, 'hit');
+      hud.addLog(`HIT: ${threat.id} intercepted! (hit-to-kill at PIP)`, '#00ff88');
+    } else {
+      engagementViz.explode(interceptor.pipPosition || interceptor.position, true);
+      engagementViz.removeInterceptor(interceptor.id);
+      hud.addLog(`MISS: ${threat.id} — S-L-S refire?`, '#ff4444');
+    }
+  });
+
+  engine.on('interceptor-selfdestructed', ({ interceptor, reason }) => {
+    engagementViz.explode(interceptor.position, true); // 소규모 자폭 이펙트
+    engagementViz.removeInterceptor(interceptor.id);
+    if (reason === 'fuel') {
+      hud.addLog(`SELF-DESTRUCT: ${interceptor.id} fuel depleted`, '#ff8800');
+    }
+  });
+
+  engine.on('threat-leaked', ({ threat }) => {
+    leaks++;
+    engagementViz.explode(threat.position, false);
+    engagementViz.removeThreat(threat.id);
+    trackingPanel.onThreatTerminated(threat.id, 'leak');
+    hud.addLog(`LEAKED: ${threat.id} impact!`, '#ff0000');
+  });
+
+  engine.on('simulation-end', ({ simTime }) => {
+    hud.addLog(`SIM COMPLETE: ${simTime.toFixed(1)}s`, '#44aaff');
+  });
+
+  return engine;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  VIZ SETUP
+// ═══════════════════════════════════════════════════════════
+function setupViz() {
+  // 레이더 볼륨
+  radarViz.addRadar('gp', POS.GREEN_PINE, 900, '#44cc44');
+  radarViz.addRadar('mfr', POS.LSAM_MFR, 310, '#00aaff');
+
+  // C2 네트워크 노드 (MFR + ECS + TEL 4대 개별 표시)
+  networkViz.addNode('GREEN_PINE_B', 'GREEN_PINE_B', 'GREEN PINE', POS.GREEN_PINE);
+  networkViz.addNode('KAMD_OPS', 'KAMD_OPS', 'KAMD OPS', POS.KAMD_OPS);
+  networkViz.addNode('ICC', 'ICC', 'ICC', POS.ICC);
+  networkViz.addNode('ECS', 'ECS', 'ECS', POS.ECS);
+  networkViz.addNode('LSAM_MFR', 'LSAM_MFR', 'L-SAM MFR', POS.LSAM_MFR);
+  networkViz.addNode('TEL_ABM1', 'LSAM', 'ABM-1 (6)', POS.TEL_ABM1);
+  networkViz.addNode('TEL_ABM2', 'LSAM', 'ABM-2 (6)', POS.TEL_ABM2);
+  networkViz.addNode('TEL_AAM1', 'LSAM', 'AAM-1 (6)', POS.TEL_AAM1);
+  networkViz.addNode('TEL_AAM2', 'LSAM', 'AAM-2 (6)', POS.TEL_AAM2);
+
+  // 데이터링크 (MFR↔ECS + ECS→TEL 4대)
+  networkViz.addLink('GREEN_PINE_B', 'KAMD_OPS', POS.GREEN_PINE, POS.KAMD_OPS, 'longRange');
+  networkViz.addLink('KAMD_OPS', 'ICC', POS.KAMD_OPS, POS.ICC, 'longRange');
+  networkViz.addLink('ICC', 'ECS', POS.ICC, POS.ECS, 'shortRange');
+  networkViz.addLink('LSAM_MFR', 'ECS', POS.LSAM_MFR, POS.ECS, 'internal');
+  networkViz.addLink('ECS', 'TEL_ABM1', POS.ECS, POS.TEL_ABM1, 'shortRange');
+  networkViz.addLink('ECS', 'TEL_ABM2', POS.ECS, POS.TEL_ABM2, 'shortRange');
+  networkViz.addLink('ECS', 'TEL_AAM1', POS.ECS, POS.TEL_AAM1, 'shortRange');
+  networkViz.addLink('ECS', 'TEL_AAM2', POS.ECS, POS.TEL_AAM2, 'shortRange');
+
+  hud.addLog('System initialized');
+  hud.addLog('GREEN_PINE: 900km L-band EWR');
+  hud.addLog('L-SAM: TEL×4 (ABM×2×6 + AAM×2×6)');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  GAME LOOP
+// ═══════════════════════════════════════════════════════════
+let lastTime = null;
+
+function loop(timestamp) {
+  if (!lastTime) { lastTime = timestamp; }
+  const dt = Math.min((timestamp - lastTime) / 1000, 0.1);
+  lastTime = timestamp;
+
+  try {
+    if (engine && engine.state === SIM_STATE.RUNNING) {
+      engine.step(dt);
+
+      // 위협/요격미사일 위치 갱신 (라벨 상시: 고도 km + Mach)
+      for (const threat of engine.threats) {
+        if (threat.state !== 'intercepted' && threat.state !== 'leaked') {
+          engagementViz.updateThreat(threat.id, threat.position, {
+            speed: threat.currentSpeed,
+            altKm: threat.position.alt / 1000,
+          });
+        }
+      }
+      for (const intc of engine.interceptors) {
+        if (intc.state !== 'detonated' && intc.state !== 'missed') {
+          engagementViz.updateInterceptor(intc.id, intc.position);
+        }
+      }
+
+      // HUD 갱신
+      const bat = engine.batteries[0];
+      hud.updateStatus(engine.state, engine.simTime, engine.architecture);
+      const active = engine.threats.filter(t => t.state !== 'intercepted' && t.state !== 'leaked').length;
+      hud.updateThreats(active, engine.threats.length);
+
+      // Threat Tracking 패널 실시간 갱신 (목록 라이브값 + 그래프)
+      trackingPanel.updateLive(engine);
+      if (bat) {
+        hud.updateBattery({
+          launchers: bat.launchers,
+          active: bat.activeEngagements, max: bat.maxSimultaneous,
+          hits, leaks,
+        });
+      }
+
+      viewer.scene.requestRender();
+    }
+  } catch (err) {
+    // 프레임 루프가 죽지 않도록 예외를 로깅만 하고 계속 진행
+    console.error('[loop error]', err, err?.stack);
+  }
+
+  animFrameId = requestAnimationFrame(loop);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CONTROLS
+// ═══════════════════════════════════════════════════════════
+function showAlert(msg) {
+  const el = document.getElementById('alert');
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 2500);
+}
+
+document.getElementById('btnStart').addEventListener('click', () => {
+  if (!engine) engine = createEngine();
+  if (engine.state === SIM_STATE.READY || engine.state === SIM_STATE.COMPLETE) {
+    if (engine.state === SIM_STATE.COMPLETE) {
+      engine.reset();
+      hits = 0; leaks = 0;
+    }
+    engine.start();
+    // SRBM 발사
+    const threat = new ThreatEntity('SRBM', POS.SRBM_ORIGIN, POS.SRBM_TARGET);
+    engine.addThreat(threat);
+    hud.updateStatus(engine.state, engine.simTime, engine.architecture);
+  } else if (engine.state === SIM_STATE.PAUSED) {
+    engine.start();
+  }
+});
+
+document.getElementById('btnPause').addEventListener('click', () => {
+  if (engine && engine.state === SIM_STATE.RUNNING) {
+    engine.pause();
+    hud.updateStatus('PAUSED', engine.simTime, engine.architecture);
+  } else if (engine && engine.state === SIM_STATE.PAUSED) {
+    engine.start();
+    hud.updateStatus(engine.state, engine.simTime, engine.architecture);
+  }
+});
+
+document.getElementById('btnReset').addEventListener('click', () => {
+  if (engine) {
+    engine.reset();
+    hits = 0; leaks = 0;
+    trackingPanel.reset();
+    // viz는 새로 생성하지 않음 (레이더/네트워크는 유지)
+    engagementViz.destroy();
+    // 재생성
+    engagementViz.threatPoints = new Cesium.PointPrimitiveCollection();
+    engagementViz.interceptorPoints = new Cesium.PointPrimitiveCollection();
+    engagementViz.trailLines = new Cesium.PolylineCollection();
+    engagementViz.labels = new Cesium.LabelCollection();
+    viewer.scene.primitives.add(engagementViz.threatPoints);
+    viewer.scene.primitives.add(engagementViz.interceptorPoints);
+    viewer.scene.primitives.add(engagementViz.trailLines);
+    viewer.scene.primitives.add(engagementViz.labels);
+    engagementViz.threatViz.clear();
+    engagementViz.interceptorViz.clear();
+
+    engine = createEngine();
+    hud.updateStatus('READY', 0, engine.architecture);
+    hud.updateBattery({ abm: 12, aam: 12, active: 0, max: 10, hits: 0, leaks: 0 });
+    hud.updateThreats(0, 0);
+    hud.addLog('System reset');
+    viewer.scene.requestRender();
+  }
+});
+
+// Speed slider
+document.getElementById('spdSlider').addEventListener('input', (e) => {
+  const val = parseInt(e.target.value);
+  document.getElementById('spdLbl').textContent = val + 'x';
+  if (engine) engine.timeScale = val;
+});
+
+// Skill slider
+document.getElementById('skillSlider').addEventListener('input', (e) => {
+  const idx = parseInt(e.target.value);
+  currentSkill = SKILLS[idx];
+  document.getElementById('skillLbl').textContent = currentSkill.toUpperCase();
+});
+
+// ═══════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════
+setupViz();
+engine = createEngine();
+cameraKoreaOverview(viewer);
+animFrameId = requestAnimationFrame(loop);
+</script>
+</body>
+</html>

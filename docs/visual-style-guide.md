@@ -97,15 +97,25 @@ dataSource.clustering.pixelRange = 40;
 dataSource.clustering.minimumClusterSize = 3;
 ```
 
-### 위협 (적) — PointPrimitiveCollection
+### 위협 (적) — PointPrimitiveCollection + LabelCollection
 - **크기**: 11px
 - **색상**: SRBM 빨강(#ff4444), CM 주황(#ff8800), 극초음속 보라(#cc44ff), UAS 노랑(#ffcc00)
 - **LOD**: `scaleByDistance` — 근거리 1.5배, 원거리 0으로 축소
+
+#### 상시 멀티라인 라벨 (Phase 1.9)
+위협 점 옆에 **이름 + 고도(km) + Mach** 3줄 라벨을 상시 표시. `distanceDisplayCondition`(0~2000km)으로 원거리 자동 hiding하여 라벨 상시 표시 금지 원칙을 준수.
+
+- **폰트**: Share Tech Mono 9px
+- **레이아웃**: pixelOffset `(12, -4)` + `horizontalOrigin: LEFT` + `verticalOrigin: CENTER` → 점 우측에 정렬
+- **갱신**: 매 프레임 `engagementViz.updateThreat(id, pos, meta)`로 텍스트 재할당
+- **데이터 소스**: `meta = { speed: threat.currentSpeed, altKm }` (sim-engine이 매 프레임 전달)
 
 ```javascript
 // 위협 포인트 — Primitive API
 const threatPoints = new Cesium.PointPrimitiveCollection();
 viewer.scene.primitives.add(threatPoints);
+const labels = new Cesium.LabelCollection();
+viewer.scene.primitives.add(labels);
 
 const point = threatPoints.add({
     position: pos,
@@ -114,7 +124,26 @@ const point = threatPoints.add({
     scaleByDistance: new Cesium.NearFarScalar(5e3, 1.5, 5e6, 0.3),
     translucencyByDistance: new Cesium.NearFarScalar(5e3, 1.0, 8e6, 0.1),
 });
-// 위치 업데이트: point.position = newPos; (매 프레임)
+
+const label = labels.add({
+    position: pos,
+    text: name,                                    // 매 프레임 갱신
+    font: '9px Share Tech Mono',
+    fillColor: color,
+    outlineColor: Cesium.Color.BLACK,
+    outlineWidth: 2,
+    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+    pixelOffset: new Cesium.Cartesian2(12, -4),
+    horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+    verticalOrigin: Cesium.VerticalOrigin.CENTER,
+    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2e6),
+});
+
+// 매 프레임 갱신
+point.position = newPos;
+label.position = newPos;
+label.text = `${name}\n${altKm.toFixed(0)} km\nM ${mach.toFixed(1)}`;
 ```
 
 ### 요격미사일 — PointPrimitiveCollection
@@ -262,17 +291,52 @@ handler.setInputAction(function(movement) {
 색상: 초록(#00ff88), 빨강(#ff4444), 노랑(#ffcc00), 파랑(#44aaff)
 ```
 
-### 우측 패널 (제어)
-- 레이더 방위각/고각/FOV 슬라이더
-- Pk 조절 슬라이더
-- 카메라 프리셋 버튼 그리드
+### 우측 패널 (Threat Tracking, Phase 1.9)
+> Phase 1.9에서 기존 우측 Controls 패널을 폐기하고 위협 추적/분석 패널로 교체.
+> 슬라이더는 하단 컨트롤 바로 통합 이동.
 
-### 하단 버튼
+- **너비**: 280px, `top:12px; right:12px;` 고정
+- **색상**: 배경 `rgba(0,4,2,0.93)`, 테두리 `rgba(0,255,136,0.32)` (HUD 톤과 통일)
+- **섹션 구성**:
+  1. **ACTIVE / TERMINATED 위협 목록**: ID, 상태(FLY/ENG/HIT/LEAK), 고도, Mach, 색상 dot
+     - 체크박스 다중 선택 (신규 스폰 시 5개까지 자동 선택)
+     - 위협별 8색 팔레트 순환: `#ff4444 #ffaa00 #44aaff #ff88ff #88ff88 #ffff44 #ff8844 #44ffff`
+  2. **METRIC 토글 탭**: `[ALT (km)] [SPD (M)] [RNG (km)]` (active 탭 강조)
+  3. **Canvas 2D 라인 그래프** (140px 높이, DPR 대응)
+     - X축: 시뮬레이션 시간(s), Y축: 선택한 메트릭 (자동 스케일)
+     - 다중 위협 중첩 표시, 위협별 색상 구분
+     - 0.25s throttled redraw, 외부 의존성 0
+- **데이터 소스**: `core/telemetry.js` API (`timeAltitudeSeries` 등)
+- **상태 색상**: HIT = `#00ff88`, LEAK = `#ff0000`, 종료 일반 = `rgba(150,150,150)`
+
+### 하단 컨트롤 바 (Phase 1.9 통합)
+> 슬라이더 + 버튼을 하단 한 줄로 통합. 화면 중앙 정렬.
+
+- 좌측: Sim Speed 슬라이더 (1~16x), Operator Skill 슬라이더 (HIGH/MID/LOW)
+- 구분선 (1px, 26px 높이, `rgba(0,255,136,0.18)`)
+- 우측: SRBM LAUNCH (빨강) / PAUSE / RESET 버튼
+
 ```css
-배경: rgba(0,4,2,0.93)
-테두리: 1px solid rgba(0,255,136,0.38)
-폰트: Share Tech Mono 9px, letter-spacing: 1px
-hover: box-shadow 0 0 8px rgba(0,255,136,0.2)
+#controls {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: rgba(0,4,2,0.93);
+  border: 1px solid rgba(0,255,136,0.3);
+  padding: 8px 12px;
+}
+.btn {
+  background: rgba(0,4,2,0.93);
+  border: 1px solid rgba(0,255,136,0.38);
+  font: 9px 'Share Tech Mono', monospace;
+  letter-spacing: 1px;
+}
+.btn:hover { box-shadow: 0 0 8px rgba(0,255,136,0.2); }
+.btn.r { border-color: rgba(255,68,68,0.38); color: #ff4444; }  /* SRBM LAUNCH */
 ```
 
 ---

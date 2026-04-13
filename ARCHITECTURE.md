@@ -1,27 +1,33 @@
 # ARCHITECTURE.md — KIDA_ADSIM v2.0 시스템 아키텍처
 
+> 시뮬레이션 방법론: **EADSIM-Lite** — PSSEK 기반 교전 판정, 3단계 센서 상태머신, S-L-S/S-S 교전 교리
+
 ## 1. 아키텍처 개요
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    index.html (메인 스레드)               │
-│  ┌──────────────┐  ┌─────────────────────────────────┐  │
-│  │  config/      │  │          viz/ (Primitive API)    │  │
-│  │  weapon-data  │  │  cesium-app ← radar-viz        │  │
-│  │  (타입+능력   │  │            ← engagement-viz    │  │
-│  │   +관계 선언) │  │            ← network-viz       │  │
-│  │              │  │            ← hud               │  │
-│  │              │  │            ← interaction       │  │
-│  └──────┬───────┘  └──────────────▲──────────────────┘  │
-│         │                         │ Float64Array         │
-│  ┌──────▼─────────────────────────┴──────────────────┐  │
-│  │          core/ (Web Worker, Cesium 무의존)          │  │
-│  │  sim-worker ← sim-engine ← entities              │  │
-│  │                ↑            ↑                     │  │
-│  │             registry ← physics                    │  │
-│  │             (질의 엔진)  killchain ← metrics       │  │
-│  └────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                    index.html (메인 스레드)                    │
+│  ┌──────────────┐  ┌──────────────────────────────────────┐  │
+│  │  config/      │  │          viz/ (Primitive API)         │  │
+│  │  weapon-data  │  │  cesium-app ← radar-viz             │  │
+│  │  (PSSEK 테이블│  │            ← engagement-viz         │  │
+│  │   +포대구성   │  │            ← network-viz            │  │
+│  │   +센서3단계  │  │            ← hud                    │  │
+│  │   +관계 선언) │  │            ← threat-tracking-panel  │  │
+│  └──────┬───────┘  └──────────────▲───────────────────────┘  │
+│         │                         │ Float64Array              │
+│  ┌──────▼─────────────────────────┴───────────────────────┐  │
+│  │          core/ (Web Worker, Cesium 무의존)               │  │
+│  │  sim-worker ← sim-engine ← entities                    │  │
+│  │                ↑            ↑                           │  │
+│  │             registry ← sensor-model (SNR 3단계)         │  │
+│  │             (질의 엔진)  engagement-model (PSSEK 5단계)  │  │
+│  │                         killchain (Strategy 패턴)        │  │
+│  │                         comms (링크지연+밴드별 재밍)      │  │
+│  │                         event-log ← metrics             │  │
+│  │                         telemetry (위협 시계열 API)      │  │
+│  └─────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ## 2. 모듈 상세
@@ -29,237 +35,610 @@
 ### 2.1 core/sim-engine.js — 시뮬레이션 엔진
 - `SimEngine` 클래스: requestAnimationFrame 기반 메인 루프
 - `step(dt)`: 매 프레임 호출, dt는 실시간 초 × 배속
-- 이벤트 버스: 'threat-detected', 'engagement-start', 'intercept-result', 'simulation-end'
+- `step(dt)`: **0.02초 물리 서브스텝** 단위로 반복. 고속 물체(Mach 9) CCD 정확도 보장.
+- 서브스텝 내부 처리 순서 (EADSIM-Lite):
+  1. **센서 상태머신 갱신** (sensor-model — 수평선 → 섹터 → SNR → 3단계 전이)
+  2. **킬체인 진행** (killchain — C2 노드별 트리거→조건→응답)
+  3. **교전 판정** (engagement-model — PSSEK 5단계, **다중 포대 선택**: selectBattery → selectLauncher)
+  4. **BDA 판정** (engagement-model — flyoutTime 경과 시 predetermined hit 적용. CCD는 BDA에서 분리됨, Phase 1.8)
+  5. 위협 이동 (physics — **typeId별 궤적 분기**: 탄도 sin(π×t) / 순항 30m / 항공기)
+  6. 요격미사일 유도 (physics — **hit-to-kill: PIP 직선 비행** / CLOS: 천마 전용)
+  7. 메트릭 수집 (metrics)
+- 이벤트 버스: 'sensor-state-change', 'killchain-step', 'engagement-start', 'bda-result', 'threat-leaked', 'simulation-end', 'interceptor-selfdestructed'
 - 상태: READY → RUNNING → PAUSED → COMPLETE
-- 시뮬레이션 시간 관리: `simTime`, `realTime`, `timeScale`
+- 시뮬레이션 시간: `simTime`, `realTime`, `timeScale`
 
-### 2.2 config/weapon-data.js — 선언적 타입 레지스트리
-v0.7.3의 ontology.py + config.py + registry.py 역할을 통합.
-**타입 정의 + 능력(capability) + 관계(topology)를 한 곳에 선언적으로 정의.**
-새 무기체계(예: LAMD) 추가 시 이 파일만 수정하면 시뮬레이션 전체에 반영.
+### 2.2 config/weapon-data.js — 선언적 타입 레지스트리 (EADSIM-Lite)
+
+**타입 정의 + PSSEK 테이블 + 포대 구성 + 센서 3단계 파라미터 + 관계를 한 곳에 선언.**
+새 무기체계(예: LAMD) 추가 시 이 파일만 수정.
 
 ```javascript
-// 구조 예시 (Object.freeze로 불변)
-export const SHOOTER_TYPES = Object.freeze({
-  LSAM_ABM: {
-    name: 'L-SAM (탄도탄)',
-    capability: {
-      maxRange: 150, minRange: 20,
-      maxAlt: 60, minAlt: 40,
-      pkTable: { SRBM: 0.85 },
-      ammoCount: 6,
-      interceptMethod: 'hit-to-kill',
-    },
-    relations: {
-      reportingC2: 'KAMD_OPS',         // 어떤 C2에 보고하는가
-      engageableThreats: ['SRBM'],     // 어떤 위협을 교전 가능한가
-      requiredSensors: ['GREEN_PINE', 'MSAM_MFR'], // 어떤 센서의 큐잉이 필요한가
-      c2Axis: 'KAMD',                  // 3축 분리 시 어느 축에 속하는가
-    },
+export const SENSOR_TYPES = Object.freeze({
+  GREEN_PINE_B: {
+    name: 'Green Pine Block-B',
+    band: 'L',                          // 주파수 밴드 → 재밍 감수성 결정
+    ranges: { detect: 900, track: 600, fireControl: null },  // 교전급 없음
+    transitionTime: { detectToTrack: 10 },
+    trackCapacity: 30,
+    role: 'early_warning',
+    detectableThreats: ['SRBM'],
+    minAltitude: 5000,
+    jammingSusceptibility: 0.3,         // L밴드: 낮음
   },
-  // LAMD 추가 시: 여기에 새 항목만 선언
-  // LAMD: { name: '장사정포요격', capability: {...}, relations: {...} },
+  LSAM_MFR: {
+    name: 'L-SAM MFR',
+    band: 'S',
+    ranges: {
+      detect: { ballistic: 310, aircraft: 400 },
+      track: { ballistic: 250, aircraft: 300 },
+      fireControl: { ballistic: 200, aircraft: 250 },
+    },
+    transitionTime: { detectToTrack: 5, trackToFC: 8 },
+    trackCapacity: { aircraft: 100, ballistic: 10 },
+    simultaneousEngagement: { aircraft: 20, ballistic: 10 },
+    role: 'fire_control',
+    detectableThreats: ['SRBM','AIRCRAFT','CRUISE_MISSILE','UAS','MLRS_GUIDED'],
+    minAltitude: 50,
+    jammingSusceptibility: 0.5,
+  },
+  // ... MSAM_MFR, PATRIOT_RADAR, AN_TPY2, FPS117, TPS880K 동일 구조
 });
 
-export const SENSOR_TYPES = Object.freeze({ /* 동일 구조 */ });
-export const C2_TYPES = Object.freeze({ /* 동일 구조 */ });
-export const THREAT_TYPES = Object.freeze({ /* 동일 구조 */ });
-export const TOPOLOGY_RELATIONS = Object.freeze({ /* 센서→C2, C2→사수 매핑 */ });
+export const SHOOTER_TYPES = Object.freeze({
+  LSAM: {
+    name: 'L-SAM',
+    missiles: {
+      ABM: {
+        engagementEnvelope: { Rmin: 20, Rmax: 150, Hmin: 50, Hmax: 60 },
+        missileSpeed: 3100,             // m/s (Mach 9)
+        pssekTable: {
+          SRBM: {
+            front:  { '20-60': 0.90, '60-100': 0.85, '100-150': 0.70 },
+            side:   { '20-60': 0.75, '60-100': 0.65, '100-150': 0.50 },
+            rear:   { '20-60': 0.60, '60-100': 0.50, '100-150': 0.35 },
+          },
+        },
+        interceptMethod: 'hit-to-kill',
+        killRadius: 50,                 // meters
+        guidance: 'IIR+DACS',
+        doctrine: 'SLS',
+        bdaDelay: 8,                    // seconds
+        launchInterval: 5,              // seconds between shots
+      },
+      AAM: {
+        engagementEnvelope: { Rmin: 10, Rmax: 150, Hmin: 0.05, Hmax: 25 },
+        missileSpeed: 1700,             // m/s (Mach ~5)
+        pssekTable: {
+          AIRCRAFT:       { front: { '10-50': 0.92, '50-100': 0.88, '100-150': 0.75 }},
+          CRUISE_MISSILE: { front: { '10-50': 0.85, '50-100': 0.78, '100-150': 0.60 }},
+          UAS:            { front: { '10-50': 0.70, '50-100': 0.55, '100-150': 0.35 }},
+        },
+        interceptMethod: 'guided',
+        killRadius: 500,
+        guidance: 'active_radar',
+        doctrine: 'SLS',
+        bdaDelay: 10,
+        launchInterval: 5,
+      },
+    },
+    priority: 'ABM_FIRST',
+    battery: {
+      mfr: 'LSAM_MFR',
+      launchers: { ABM: 2, AAM: 2 },   // 발사대 수
+      roundsPerLauncher: 6,
+      totalRounds: { ABM: 12, AAM: 12 },// 포대 총 탄수
+    },
+    relations: {
+      ecs: 'ECS', icc: 'ICC',
+      commandC2: ['KAMD_OPS', 'MCRC'],
+      c2Axis: ['KAMD', 'MCRC'],
+      engageableThreats: ['SRBM','AIRCRAFT','CRUISE_MISSILE','UAS'],
+      requiredSensors: ['GREEN_PINE_B','GREEN_PINE_C','LSAM_MFR'],
+    },
+  },
+  // ... PAC3, CHEONGUNG2, CHEONGUNG1, THAAD, BIHO, CHUNMA, KF16 동일 구조
+});
+
+export const C2_TYPES = Object.freeze({
+  KAMD_OPS: {
+    processing: { system: [5,10], operator: { high: 15, mid: 30, low: 50 } },
+    simultaneousCapacity: 3, tier: 'command',
+  },
+  ICC: {
+    processing: { system: [3,5], operator: { high: 2, mid: 5, low: 10 } },
+    simultaneousCapacity: 5, tier: 'battalion',
+  },
+  ECS: {
+    processing: { system: [1,2], operator: { high: 1, mid: 2, low: 3 } },
+    simultaneousCapacity: 8, tier: 'battery',
+  },
+  IAOC: {
+    processing: { system: [1,2], operator: { high: 0, mid: 0.5, low: 1 } },
+    simultaneousCapacity: 20, tier: 'integrated',
+  },
+  EOC: {
+    processing: { system: [0.5,1], operator: { high: 0.5, mid: 1, low: 2 } },
+    simultaneousCapacity: 10, tier: 'integrated',
+  },
+});
+
+export const LINK_DELAYS = Object.freeze({
+  longRange: 16,   // GREEN_PINE→KAMD, KAMD→ICC, MCRC→ICC, 축간
+  shortRange: 1,   // ICC→ECS, ECS→발사대
+  internal: 0.5,   // MFR→ECS
+  ifcn: 1,         // Kill Web 모든 링크
+});
+
+export const THREAT_TYPES = Object.freeze({ /* weapon-specs 섹션 3 참조 */ });
 ```
 
-### 2.3 core/registry.js — 엔티티 레지스트리 (질의 엔진)
-weapon-data.js의 선언적 정의를 바탕으로 런타임 질의를 제공.
-v0.7.3 registry.py의 JS 대응물. **킬체인과 사수 선정 로직이 직접 weapon-data를 탐색하지 않고 반드시 이 모듈을 경유.**
+### 2.3 core/registry.js — 질의 엔진
 
 ```javascript
 class Registry {
-  constructor(weaponData) { /* SHOOTER_TYPES, SENSOR_TYPES 등 로딩 */ }
+  constructor(weaponData) { /* SENSOR/SHOOTER/C2/THREAT_TYPES 로딩 */ }
 
-  // 특정 위협에 Pk>0인 사수를 Pk 내림차순으로 반환
-  getPrioritizedShooters(threatTypeId) { ... }
+  // PSSEK 조회: 무기-위협-거리구간-접근각 → Pk
+  lookupPSSEK(shooterTypeId, missileType, threatTypeId, rangeBin, aspect) { ... }
 
-  // 특정 C2에 연결된 센서/사수 목록
-  getSensorsForC2(c2TypeId) { ... }
-  getShootersForC2(c2TypeId) { ... }
+  // 교전 봉투 판정: PIP가 봉투 내에 있는가?
+  isInEnvelope(shooterTypeId, missileType, pip) { ... }
 
-  // 특정 사수의 축(axis) 조회 (3축 분리용)
-  getAxisForShooter(shooterTypeId) { ... }
+  // 특정 위협에 교전 가능한 사수 목록 (PSSEK 최대값 내림차순)
+  getPrioritizedShooters(threatTypeId, pip) { ... }
 
-  // 특정 센서가 탐지 가능한 위협 유형 목록
-  getDetectableThreats(sensorTypeId) { ... }
+  // 포대 동시교전 상한 조회
+  getSimultaneousLimit(shooterTypeId) { ... }
 
-  // 새 무기체계 추가 시 자동 토폴로지 생성
+  // 센서 3단계 파라미터 조회
+  getSensorRanges(sensorTypeId, threatRCS) { ... }
+
+  // 센서별 기준 RCS 조회 (SNR 공식용)
+  getRcsRef(sensorTypeId) { ... }  // GREEN_PINE: 0.1, LSAM_MFR: 1.0, etc.
+
+  // C2 토폴로지 그래프 생성
   buildTopology(architecture) { ... } // 'linear' | 'killweb'
+
+  // 밴드별 재밍 감수성 조회
+  getJammingSusceptibility(sensorTypeId) { ... }
 }
 ```
 
-### 2.4 core/entities.js — 런타임 엔티티 인스턴스
-Registry에서 타입 정보를 받아 생성되는 **런타임 상태 객체**.
-타입 정의(capability/relation)는 weapon-data.js에, 런타임 상태(위치/탄약/교전중 여부)는 여기에.
+### 2.4 core/entities.js — 런타임 엔티티
 
 ```
 BaseEntity { id, typeId, position{lon,lat,alt}, operational }
-  ├─ SensorEntity { typeId→Registry 참조, currentTracking[], detectedThreats[] }
-  ├─ C2Entity { typeId→Registry 참조, pendingTracks[], engagementPlan[] }
-  ├─ ShooterEntity { typeId→Registry 참조, currentAmmo, engagedTarget, status }
-  └─ ThreatEntity { typeId→Registry 참조, velocity, altitude, identifiedAs, state }
 
-InterceptorEntity { position, velocity, speed, boostTime, guidanceNav, targetThreat }
+SensorEntity {
+  typeId → Registry 참조
+  // EADSIM 3단계 상태머신 (각 표적별 독립)
+  trackStates: Map<threatId, {
+    state: 'UNDETECTED' | 'DETECTED' | 'TRACKED' | 'FIRE_CONTROL',
+    transitionTimer: number,
+    consecutiveMisses: number,   // 3회 연속 미탐지 → 추적 상실
+  }>
+}
+
+C2Entity {
+  typeId → Registry 참조
+  processingQueue: []            // 처리 대기 큐 (동시처리 상한 적용)
+  engagementPlan: []
+  operatorSkill: 'high' | 'mid' | 'low'  // 운용원 숙련도
+}
+
+BatteryEntity {
+  shooterTypeId → Registry 참조
+  mfrSensorId: string           // 소속 MFR 센서 ID
+  ecsC2Id: string               // 소속 ECS C2 ID
+  launchers: [                  // 개별 발사대(TEL) 배열
+    { id, missileType, capacity, remaining }
+  ]
+  activeEngagements: number     // 현재 교전 중인 수
+  maxSimultaneous: number       // 동시교전 상한 (MFR 제한)
+  launchQueue: []               // 발사 대기 큐 (launchInterval 적용)
+  bdaPending: Map<interceptorId, { timer: number, threatId: string }>
+  // 발사 시: selectLauncher(missileType) → 잔여 탄 있는 TEL 선택 → fireLauncher(id)
+}
+
+ThreatEntity {
+  typeId → Registry 참조
+  velocity, altitude, identifiedAs, state
+  flightPhase: number           // 비행 단계 (0~2)
+  currentRCS: number            // 단계별 RCS 변화
+  maneuvering: boolean
+  ecmActive: boolean
+}
+
+InterceptorEntity {
+  position, velocity, prevPosition  // prevPosition: 연속 충돌 감지(CCD)용
+  missileSpeed: number          // weapon-data에서 가져온 속도
+  guidanceType: 'PNG' | 'CLOS'  // 천마만 CLOS, 나머지 PNG
+  killRadius: number
+  targetThreatId: string
+  pssekPk: number               // 발사 시점 PSSEK 조회 결과
+  fuelRemaining: number
+  launcherId: string            // 발사한 TEL ID
+}
 ```
 
-핵심 분리 원칙: **"무엇을 할 수 있는가"는 weapon-data(불변), "지금 어떤 상태인가"는 entity(가변)**
+핵심 원칙: **능력(PSSEK/봉투/포대구성)은 weapon-data(불변), 상태(탄약/교전큐/센서상태)는 entity(가변)**
 
-### 2.5 core/physics.js — 물리 엔진
-- `ballisticTrajectory(origin, target, speed, dt)`: 2체 포물선 궤적 (중력 + 드래그)
-- `cruiseMissileTrajectory(pos, target, speed, terrainHugging, dt)`: 저고도 순항
-- `pngGuidance(interceptorPos, interceptorVel, targetPos, speed, dt, N)`: 비례항법유도 (patriot-sim.html에서 추출)
-- `slantRange(pos1, pos2)`: 3D 경사거리 (km)
-- `isInSector(sensorPos, targetPos, azCenter, azHalf, elMax, maxRange)`: 구면 부채꼴 탐지 판정 (patriot-sim.html의 inDetectSector 패턴)
-- `detectionProbability(distance, maxRange, rcs, jamming)`: P = max(0, 1-(d/Reff)²)×(1-jam), Reff = R×(RCS/1.0)^0.25
+### 2.5 core/sensor-model.js — SNR 기반 3단계 센서 모델 (EADSIM-Lite)
 
-### 2.6 core/killchain.js — Strategy 패턴 + 킬체인 프로세스
+```javascript
+// 매 스캔 주기마다 호출
+updateSensorState(sensor, threat, jamming, dt):
+
+  // 0. 기하학적 사전 필터 (Phase 1.7 보강)
+  //    (a) 레이더 수평선 체크: horizon = sqrt(2*R*h_ant) + sqrt(2*R*h_target)
+  //        수평선 밖 → UNDETECTED 유지, SNR 계산 스킵
+  //    (b) 섹터 체크: isInSector(방위각, 고각, minAltitude)
+  //        섹터 밖 → UNDETECTED 유지
+  //    (c) minAltitude 미만 → UNDETECTED 유지
+
+  // 1. SNR 기반 탐지확률 계산 (센서별 RCS_ref 사용)
+  d = slantRange(sensor.position, threat.position)
+  rcs = threat.currentRCS  // 비행 단계별 변화 (registry에서 조회)
+  R_ref = registry.getSensorRanges(sensor.typeId).detect
+  rcs_ref = registry.getRcsRef(sensor.typeId)  // 센서별 기준 RCS
+  SNR = (R_ref / d)⁴ × (rcs / rcs_ref)
+  P_detect = min(0.99, max(0, SNR^0.5 × 0.95))
+  // ※ EADSIM-Lite 단순화: 큐잉(GREEN_PINE→MFR 방향 지시)은 미모델링.
+  //    MFR은 위협이 자체 탐지 범위에 진입하면 독립적으로 탐지 시작.
+
+  // 2. 재밍·대응수단 보정 (밴드별)
+  susceptibility = registry.getJammingSusceptibility(sensor.typeId)
+  effectiveJamming = jamming × susceptibility
+  ecmFactor = threat.ecmActive ? getEcmFactor(threat.typeId) : 0
+  P_final = P_detect × (1 - effectiveJamming) × (1 - ecmFactor)
+
+  // 3. 상태 전이
+  trackState = sensor.trackStates.get(threat.id)
+  switch(trackState.state):
+    case 'UNDETECTED':
+      if random() < P_final → 'DETECTED', start transition timer
+    case 'DETECTED':
+      if transition timer expired → 'TRACKED'
+      if 3 consecutive misses → 'UNDETECTED'
+    case 'TRACKED':
+      if hasFireControlCapability(sensor) && transition timer expired → 'FIRE_CONTROL'
+      if 3 consecutive misses → 'UNDETECTED'
+    case 'FIRE_CONTROL':
+      if 3 consecutive misses → 'TRACKED' (열화)
+```
+
+### 2.6 core/engagement-model.js — PSSEK 5단계 교전 모델 (EADSIM-Lite)
+
+```javascript
+// EADSIM 5단계 교전 판정
+evaluateEngagement(threat, battery, simTime):
+
+  // STEP 1: 교전 봉투 판정 + flyout 실현 가능성 검증
+  pip = predictInterceptPoint(threat, battery, trajectoryFn)
+    // trajectoryFn: threat.typeId별 실제 궤적 함수 (sin 포물선/순항/항공기)
+    // PIP: 미사일 flyout ≤ 위협 도달 시간인 봉투 내 지점
+    // (미사일과 위협이 동시 도달 가능해야 유효)
+  if !pip → SKIP (실현 가능한 교전점 없음)
+
+  // STEP 2: 센서 교전급 추적 확인
+  mfrState = getSensorState(battery.mfrSensorId, threat.id)
+  if mfrState !== 'FIRE_CONTROL' → WAIT
+
+  // STEP 3: 발사 시점 판정
+  d_pip = slantRange(battery.position, pip)
+  t_flyout = d_pip × 1000 / missileSpeed    // meters / (m/s) = seconds
+  t_launch = t_threat_at_pip - t_flyout - safetyMargin
+  if simTime < t_launch → WAIT
+
+  // STEP 4: PSSEK 조회 + 보정
+  rangeBin = getRangeBin(d_pip, shooterTypeId)
+  aspect = getAspectAngle(battery.position, threat)  // front/side/rear
+  pk = registry.lookupPSSEK(shooterTypeId, missileType, threat.typeId, rangeBin, aspect)
+  // 재밍 보정 — 센서 밴드별 감수성 (Phase 1.8): L밴드 0.3, S밴드 0.5, X밴드 0.8+
+  susceptibility = registry.getJammingSusceptibility(mfrSensor.typeId)
+  pk *= (1 - jamming × susceptibility)
+  pk *= (1 - getEcmPkPenalty(threat))       // 대응수단 보정
+  if architecture === 'killweb': pk *= 1.10  // 컴포지트 트래킹 보너스
+
+  // STEP 5: 교전 교리 적용
+  if pk < 0.10 → SKIP (교전 불가)
+  if pk < 0.30 && remainingOpportunities > 2 → WAIT
+  // 동시교전 상한 체크
+  if battery.activeEngagements >= battery.maxSimultaneous → WAIT
+
+  doctrine = getDoctrine(shooterTypeId, threat.typeId)
+  // EADSIM-Lite: 발사 시점에 PSSEK로 결과 즉시 결정 (predetermined hit)
+  interceptor.predeterminedHit = random() < pk
+
+  if doctrine === 'SS':
+    launchInterceptor(battery, threat, pk)   // 1발
+    launchInterceptor(battery, threat, pk)   // 2발 동시
+  else: // SLS
+    launchInterceptor(battery, threat, pk)   // 1발 발사
+    scheduleBDA(battery, threat, flyoutTime) // BDA = flyout 도달 시점
+
+// BDA 완료 후 (flyoutTime 경과 시):
+onBDAComplete(battery, threat, interceptor):
+  // 발사 시점에 결정된 결과 적용
+  if interceptor.predeterminedHit → HIT → 교전 종료
+  if !interceptor.predeterminedHit → MISS:
+    // 2nd Shoot 재발사 판단: 새 PIP 봉투 검증
+    pip2 = predictInterceptPoint(threat, battery, trajectoryFn)
+    if pip2 && isInEnvelope(pip2):
+      재발사 (동일 사수, 2nd Shoot)
+    else:
+      SKIP → 봉투 밖 → Phase 2에서 하위 체계 핸드오프 (천궁-II 등)
+```
+
+### 2.6.1 발사 후 물리 시뮬레이션 + 결과 판정
+
+```javascript
+// 매 서브스텝(0.02초) 요격미사일 갱신
+updateInterceptor(interceptor, threat, dt):
+  interceptor.prevPosition = interceptor.position  // CCD용
+
+  // 유도 방식별 비행 (시각화용 — 결과는 이미 predetermined)
+  if interceptor.interceptMethod === 'hit-to-kill':
+    // PIP(예상 교전점)으로 직선 비행 (L-SAM ABM, THAAD, PAC-3)
+    // 중간유도(관성+데이터링크) → 종말유도(IIR/DACS)
+    flyToward(interceptor, interceptor.pipPosition, dt)
+  else if interceptor.guidanceType === 'CLOS':
+    closGuidance(interceptor, threat, operator, dt)  // 천마 전용
+  else:
+    // PNG 비례항법 (근접신관 방식: 천궁, AAM, AIM-120 등)
+    pngGuidance(interceptor, threat, dt, N=4)
+
+  // 결과 판정: flyoutTime 경과 시 발사 시점 predetermined 결과 적용 (단일 트리거)
+  if interceptor.elapsedTime >= interceptor.flyoutTime:
+    if interceptor.predeterminedHit → HIT → 폭발(PIP 위치)
+    else → MISS → 자폭
+
+  // ※ Phase 1.8부터 CCD(checkInterceptResult)는 BDA 판정에서 완전 분리됨.
+  //   교전 결과는 flyoutTime 단일 트리거로만 적용. checkInterceptResult 함수는
+  //   @deprecated로 마킹되어 시각화 보조 전용으로 보존 (향후 제거 가능).
+
+  // 위협 지면 도달 시: flyout 미경과 미사일 → MISS(too_late)
+  if interceptor.fuelRemaining <= 0 → MISS (연료 소진) → 자폭
+```
+
+### 2.7 core/killchain.js — Strategy 패턴
 
 **ArchitectureStrategy (추상 인터페이스)**:
-새 아키텍처(예: "하이브리드 C2") 추가 시 이 인터페이스만 구현하면 SimEngine 수정 없이 확장 가능.
 ```
 ArchitectureStrategy {
-  buildTopology(registry, entities)     // 토폴로지 그래프 생성
-  runKillchain(threat, sensors, c2s)    // 킬체인 프로세스 실행 (Promise)
-  selectShooter(threat, candidates)     // 최적 사수 선정
-  identifyThreatType(threat, sensors)   // 위협 유형 식별
-  fuseTracks(threat, sensorList)        // 항적 융합 (또는 미융합)
-  updateCop(entities)                   // COP 갱신 (Kill Web 전용)
-  getMaxSimultaneous(threat, ammoState) // 동시교전 수 결정
+  buildTopology(registry, entities)
+  runKillchain(threat, sensors, c2s, batteries)
+  selectShooter(threat, candidates)
+  identifyThreatType(threat, sensors)
+  fuseTracks(threat, sensorList)
+  updateCop(entities)
+  getDoctrineForThreat(threat, battery)
 }
 ```
 
 **LinearKillChain** (ArchitectureStrategy 구현):
 ```
-센서→C2 보고(5~15s) → 축별 C2 큐 대기 → 위협평가+승인(15~120s)
-→ 무기큐잉(3~10s) → 레이더 추적(5~15s) → 화력통제(2~5s) → 사수통보(5~15s)
-총 ~48~160초
+GREEN_PINE 탐지 → 탐지→추적 전이(10s)
+  ↓ (16s 링크)
+KAMD_OPS: 시스템(5~10s) + 운용원(15~50s)
+  ↓ (16s 링크)
+ICC: 시스템(3~5s) + 운용원(2~10s)
+  ↓ (1s 링크)
+ECS: 시스템(1~2s) + 운용원(1~3s)
+  ↓ 포대 MFR 병행 가동 → 교전급 추적 확립(8s)
+  ↓ (1s 링크)
+발사대 → PSSEK 5단계 교전 판정 → 발사
+
+총 S2S: 84~137초 (고숙련~저숙련)
 ```
-- identifyThreatType: ballistic 시그니처 + MLRS → **70% 확률 SRBM 오인식**
-- fuseTracks: 융합 없음 (단일 센서 기반)
-- **다축 독립 킬체인**: 동일 위협이 다른 축에서 탐지 시 별도 킬체인 실행 → 중복교전 발생
+- identifyThreatType: MLRS → **70% SRBM 오인식**
+- fuseTracks: 융합 없음 (단일 센서), 오상관 5%, 미상관 10%
+- 다축 독립 킬체인 → 중복교전
 
 **KillWebKillChain** (ArchitectureStrategy 구현):
 ```
-COP 자동 융합(1~2s) → 부하 분산 C2(1~3s) → 무기큐잉(1~3s)
-→ 자동큐잉 레이더(2.5~7.5s) → 사수통보(1~2s)
-총 ~7~23초
+모든 센서 → IAOC 자동 융합(1s) → 컴포지트 트래킹
+  → IAOC 최적 사수 선정(1~3s)
+  → EOC(1~3s) → 발사
+
+총 S2S: 5~9초
 ```
-- identifyThreatType: 2개+ 센서 → 100% 정확, 단일 센서 → 10% 오인식
-- fuseTracks: √N 오차감소, fusion_bonus 최대 Pk +10%
-- updateCop: 매 스텝 전 사수 pos/ammo/engaged/operational 공유
-- selectShooter: score = Pk × (1/거리) × 탄약비율 × 부하계수 + friendly_bonus(0.15)
+- identifyThreatType: 2개+ 센서 100% 정확, 단일 10% 오인식
+- fuseTracks: 자동 상관, 오상관 1%, 미상관 2%, **Pk +10%**
+- updateCop: 매 스텝 auno/교전상태/센서상태 전체 공유
+- selectShooter:
+  ```
+  score = base_pk × (1/거리) × 탄약비율 × 부하계수 + friendly_bonus(0.15)
+  base_pk = PSSEK 최대값 (최적 거리구간·정면 기준)
+  ```
 
-### 2.6.1 교전 판정 로직 (SimEngine에서 호출)
+### 2.8 core/comms.js — 통신 채널 모델
+
+```javascript
+class CommChannel {
+  // 링크 지연 + 밴드별 재밍 열화
+  getLinkLatency(fromNode, toNode, jammingLevel):
+    baseDelay = LINK_DELAYS[linkType]  // 16s or 1s or 0.5s
+    degradation = baseDelay × jammingLevel × (0.5 + random())
+    if degradation > baseDelay × 0.8 → Infinity (두절)
+    if architecture === 'killweb': degradation *= 0.5  // IFCN 다중경로
+    return baseDelay + degradation
+}
 ```
-_should_engage_now(threat):
-  if Pk ≥ 0.30 → ENGAGE
-  if distance ≤ 30km → ENGAGE (무조건)
-  if remaining_opportunities ≤ 2 → ENGAGE (Pk ≥ 0.10)
-  else → WAIT
 
-_execute_multi_engagement(threat, shooters):
-  for each shooter: independent Bernoulli(compute_pk)
-  if any hit → threat.destroy()
-  record engaged shooter types → prevent same-type re-engagement
-  allow different-type re-engagement (다층 핸드오프)
-```
+### 2.9 core/event-log.js — 이벤트 로그
 
-### 2.6.2 core/comms.js — 통신 채널 모델
-- `CommChannel`: 링크 유형별 지연 딕셔너리 (weapon-specs.md 섹션 8 참조)
-- `getDelay(linkType, architecture)`: 아키텍처별 지연 반환
-- `getLinkLatency(link, jammingLevel)`: 링크별 고유 열화계수 × 재밍 → threshold 초과 시 두절
-- Kill Web: `redundancy_factor = 0.5` (열화 50% 완화)
-- 킬체인의 각 Promise 딜레이에 CommChannel 지연 적용
-
-### 2.6.3 core/event-log.js — 이벤트 로그 시스템
-모든 메트릭 계산의 기반 데이터. 킬체인 단계별 시간을 구조적으로 기록.
 ```
 EventLog entry = {
-  threatId, eventType, simTime, 
-  data: { sensorId, c2Id, shooterId, axis, pkValue, result, ... }
+  threatId, eventType, simTime,
+  data: { sensorId, c2Id, batteryId, missileType, pkValue, aspect,
+          rangeBin, doctrine, bdaResult, ... }
 }
 
-eventTypes: 
-  THREAT_SPAWNED, THREAT_DETECTED, KILLCHAIN_STARTED,
-  C2_AUTHORIZED, SHOOTER_ASSIGNED, ENGAGEMENT_FIRED,
+eventTypes:
+  THREAT_SPAWNED, SENSOR_DETECTED, SENSOR_TRACKED, SENSOR_FIRE_CONTROL,
+  KILLCHAIN_STARTED, C2_PROCESSING, C2_AUTHORIZED,
+  SHOOTER_ASSIGNED, ENGAGEMENT_FIRED(doctrine, pk),
+  BDA_STARTED, BDA_COMPLETE(result),
   INTERCEPT_HIT, INTERCEPT_MISS, THREAT_LEAKED,
-  NODE_DESTROYED, LINK_SEVERED, COP_UPDATED
+  NODE_DESTROYED, LINK_SEVERED, COP_UPDATED,
+  AMMO_DEPLETED, SIMULTANEOUS_LIMIT_REACHED
 ```
-- S2S = eventLog.find(INTERCEPT_HIT).simTime - eventLog.find(THREAT_DETECTED).simTime
-- 누출률 = THREAT_LEAKED.count / THREAT_SPAWNED.count × 100
 
-### 2.7 core/metrics.js — 성능 지표
-Phase별 점진 추가. 초기 핵심 6개:
-1. S2S 시간 (탐지→격추 소요 시간)
-2. 누출률 (방어구역 통과 위협 비율)
-3. 교전 성공률 (격추/발사 비율)
-4. 탄약 효율 (발사/격추 비율)
-5. 중복교전율 (동일 위협 다중 교전 비율)
-6. 위협 식별 정확도
+### 2.10 core/metrics.js — EADSIM MOE/MOP (10개)
 
-### 2.8 viz/ — Cesium 3D 시각화 (대규모 최적화)
+```javascript
+class Metrics {
+  // MOE
+  getPRA()              // 전 위협 격추 MC 반복 비율
+  getLeakerRate()       // 관통 위협 / 총 위협
+
+  // MOP
+  getS2S()              // 탐지→격추 소요 시간 (평균, 분포)
+  getEngagementRate()   // 격추 / 발사
+  getAmmoEfficiency()   // 격추당 소모 탄수
+  getDuplicateRate()    // 동일 위협 다중 교전 비율
+  getIdentAccuracy()    // 올바른 식별 / 총 식별
+  getWasteRate()        // 저가 위협에 고가 탄 비율
+  getTLS()              // 최종 격추 잔여 거리
+  getBDAWait()          // S-L-S BDA 추가 소요 시간
+}
+```
+
+### 2.10.1 core/telemetry.js — 위협 텔레메트리 시계열 API (Phase 1.9)
+
+`ThreatEntity.telemetry` 링 버퍼를 그래프 라이브러리 중립적 시리즈로 변환하여
+분석 패널·CSV 내보내기·Chart.js 등 어떤 소비자에게도 동일한 형식으로 제공.
+Cesium 무의존 (core 모듈).
+
+**데이터 모델** (entities.js):
+```javascript
+ThreatEntity {
+  currentSpeed: number,         // m/s — updateFlight() 시 trajectory.speed로 갱신
+  telemetry: Array<Sample>,     // 링 버퍼 (기본 maxSamples=600)
+  lastTelemetryT: number,       // 샘플링 간격 체크용 (-Infinity 초기화)
+
+  recordTelemetry(simTime, rangeToTargetKm, maxSamples = 600)
+}
+
+// 샘플 구조
+Sample {
+  t,                  // 시각 (s)
+  lon, lat, alt,      // 위치
+  altKm,              // 고도 (km)
+  speed,              // m/s
+  mach,               // = speed / 340
+  rangeToTargetKm,    // 표적까지 잔여 거리 (km)
+  progress, phase, rcs, state
+}
+```
+
+**자동 샘플링** (sim-engine.js):
+- 옵션: `telemetryInterval` (기본 0.5s), `telemetryMaxSamples` (기본 600)
+- `_stepThreats()`에서 `simTime - threat.lastTelemetryT >= interval` 시 자동 호출
+
+**API**:
+```javascript
+// 그래프 라이브러리 중립 시리즈 추출
+toTimeSeries(threat, field) → { t: number[], y: number[] }
+
+// 편의 함수 (필드 고정)
+timeAltitudeSeries(threat)    // y = altKm
+timeSpeedSeries(threat)       // y = mach
+timeRangeSeries(threat)       // y = rangeToTargetKm
+
+// 내보내기
+exportThreatTelemetry(threat) // 깊은 복사 dump
+exportAllTelemetry(threats)   // 다중 위협 dump
+getLatestSample(threat)       // 가장 최근 샘플 또는 null
+```
+
+**소비처**:
+- `viz/threat-tracking-panel.js` — 실시간 라이브 값 + Canvas 그래프
+- 향후: CSV/JSON 내보내기, Chart.js 분석 패널, 메트릭 수집
+
+### 2.11 viz/ — Cesium 3D 시각화
+
 모든 viz 모듈은 core의 이벤트를 구독하여 렌더링만 수행.
 **동적 오브젝트는 Primitive API, 정적 오브젝트는 Entity API** 이원화.
 
 - `cesium-app.js`: Viewer 초기화 (`requestRenderMode: true`, `scene3DOnly: true`), 카메라 프리셋
-- `radar-viz.js`: GeometryInstance 배칭으로 전체 레이더 볼륨 1회 생성, ShowAttribute로 호버 토글
-- `engagement-viz.js`: PointPrimitiveCollection(위협/요격미사일) + PolylineCollection(궤적), CallbackProperty 금지
-- `network-viz.js`: PolylineCollection(데이터링크), `allowPicking: false`
-- `hud.js`: HTML overlay, Cesium 렌더링 독립
-- `interaction.js`: ScreenSpaceEventHandler — 호버 pick(스로틀링), 클릭 선택, 조건부 가시성
+- `radar-viz.js`: GeometryInstance 배칭, 호버 토글. **3단계 센서 상태 색상 반영** (미탐지: 투명, 탐지: 노랑, 추적: 주황, 교전급: 녹색)
+- `engagement-viz.js`: PointPrimitiveCollection(위협/요격미사일) + PolylineCollection(궤적)
+  - **S-L-S/S-S 교리 시각화**: S-S 시 2발 동시 발사 궤적 표시
+  - **BDA 대기 표시**: 발사 후 BDA 지연 동안 '판정 대기' 상태 표시
+  - **상시 멀티라인 라벨** (Phase 1.9): 위협 옆에 이름 + 고도(km) + Mach 표시.
+    `updateThreat(id, pos, meta)` 시그니처 — meta로 매 프레임 라벨 갱신.
+    pixelOffset/horizontalOrigin LEFT로 점 옆 배치, distanceDisplayCondition 2000km.
+- `network-viz.js`: 데이터링크 시각화, **킬체인 진행 애니메이션** (C2 노드 순차 활성화)
+- `hud.js`: HTML overlay (좌측)
+  - 킬체인 진행 상태 (탐지→추적→교전급→C2 분석→교전 승인→발사→BDA)
+  - 포대 상태 (탄약 잔여량, 교전 큐, 동시교전 현황)
+  - **EADSIM MOE/MOP 실시간 표시** (PRA, 누출률, S2S, 탄약 효율)
+- `threat-tracking-panel.js` (Phase 1.9): 우측 상시 패널 (280px)
+  - **데이터 소스**: `core/telemetry.js` API (시리즈 추출 + 라이브 샘플)
+  - **목록 섹션**: ACTIVE / TERMINATED 자동 분류
+    - 라이브 값: ID, 상태(FLY/ENG/HIT/LEAK), 고도, Mach
+    - 체크박스 다중 선택 (신규 스폰 시 5개까지 자동 선택)
+  - **분석 섹션**: METRIC 토글(ALT/SPD/RNG) + Canvas 2D 라인 그래프
+    - 다중 위협 중첩 표시, 위협별 색상 구분, DPR 대응
+    - 0.25s throttled redraw, 외부 의존성 0
+  - **이벤트 훅**: `onThreatSpawned`, `onThreatTerminated`, `updateLive(engine)`, `reset()`
+  - 향후 확장: Chart.js 교체 / CSV 내보내기 / 시나리오 비교
+- `interaction.js`: 호버 pick, 클릭 선택, 조건부 가시성
 
-### 2.9 core/sim-worker.js — Web Worker (시뮬레이션 전담)
-- core/ 전체 로직을 Worker 스레드에서 실행 (물리, 킬체인, 메트릭)
+### 2.12 core/sim-worker.js — Web Worker
+
+- core/ 전체를 Worker에서 실행 (sensor-model, engagement-model, killchain, physics, metrics)
 - 매 프레임 결과를 Float64Array(Transferable)로 메인 스레드에 전송
-- 메인 스레드는 수신된 위치 배열로 Primitive 위치만 갱신
-- Phase 1에서는 메인 스레드 단일, Phase 4+에서 Worker 분리
+- 메인 스레드는 Primitive 위치 갱신 + 이벤트 → viz 업데이트
+- Phase 1: 메인 스레드 단일, Phase 4+: Worker 분리
 
-## 3. 데이터 흐름 (Worker 분리 아키텍처)
+## 3. 데이터 흐름
 
 ```
-[weapon-data.js] → [SimEngine 초기화 (Worker)]
+[weapon-data.js] → [SimEngine 초기화]
                       ↓
-              [엔티티 배치 (센서, C2, 사수)]
+              [엔티티 배치 (센서, C2, 포대, 위협)]
                       ↓
-              [위협 생성 + 활성화]
-                      ↓
-  ┌── Worker 스레드 ──────────────────┐  ┌── 메인 스레드 ──────────────┐
-  │  ┌─ [step(dt)] ──────────────┐   │  │                             │
-  │  │  1. 위협 이동 (physics)    │   │  │  Float64Array 수신          │
-  │  │  2. 센서 탐지 (isInSector) │   │  │      ↓                     │
-  │  │  3. 킬체인 진행            │──→│──→│  Primitive 위치 갱신       │
-  │  │  4. 요격미사일 유도        │   │  │  이벤트 → viz 업데이트     │
-  │  │  5. 충돌 판정              │   │  │  requestRender()           │
-  │  │  6. 메트릭 수집            │   │  │                             │
-  │  └────────────────────────────┘   │  │  마우스 pick → 호버 토글   │
-  └───────────────────────────────────┘  └─────────────────────────────┘
+  ┌── Worker 스레드 ──────────────────────┐  ┌── 메인 스레드 ────────────┐
+  │  ┌─ [step(dt)] ─────────────────┐    │  │                           │
+  │  │  1. 위협 이동 (physics)      │    │  │  Float64Array 수신        │
+  │  │  2. 센서 3단계 갱신          │    │  │      ↓                   │
+  │  │  3. 킬체인 C2 상태머신      │    │  │  Primitive 위치 갱신     │
+  │  │  4. PSSEK 5단계 교전 판정   │───→│──→│  이벤트 → viz           │
+  │  │  5. 요격미사일 PNG/CLOS     │    │  │  requestRender()         │
+  │  │  6. BDA 판정 (Pk 판정)      │    │  │                           │
+  │  │  7. MOE/MOP 수집            │    │  │  호버 pick → 토글        │
+  │  └──────────────────────────────┘    │  │                           │
+  └──────────────────────────────────────┘  └───────────────────────────┘
 ```
 
 ## 4. 아키텍처 비교 모드
 
 두 아키텍처를 동일 시나리오에서 병렬 실행:
 - **Left Panel**: LinearC2 SimEngine 인스턴스
-- **Right Panel**: KillWeb SimEngine 인스턴스  
+- **Right Panel**: KillWeb SimEngine 인스턴스
 - 동일 난수 시드, 동일 위협 시나리오
-- HUD에서 실시간 메트릭 비교 표시
+- HUD에서 EADSIM MOE/MOP 실시간 비교
 
-## 5. 기존 v0.7.3 → v2.0 주요 변경점
+## 5. v0.7.3 → v2.0 주요 변경점
 
-| 영역 | v0.7.3 | v2.0 |
-|------|--------|------|
-| 언어 | Python + JS | JS only (프론트엔드 단일) |
-| 시뮬레이션 | 5초 스텝, 사후 CZML | 프레임 단위 실시간 |
-| 요격 | Pk 확률만 (미사일 엔티티 없음) | PNG 유도 요격미사일 물리 시뮬레이션 |
-| 위협궤적 | 직선이동+고도 선형보간 | 포물선 탄도, 순항 지형추종, 극초음속 S자기동 |
-| 센서 | 2D 거리 기반 확률 | 3D 구면 부채꼴 탐지 |
-| 네트워크 | NetworkX 토폴로지 | JS 그래프 + 시각적 데이터링크 |
-| 3D 렌더링 | CZML 사후 변환 (Entity만 사용) | Primitive API(동적) + Entity(정적) 이원화 |
-| 렌더링 모드 | 항상 렌더링 | requestRenderMode + 수동 requestRender |
-| 레이더 볼륨 | 상시 표시 (전체 재생성) | GeometryInstance 배칭 + 호버 토글 |
-| 스레드 | 단일 스레드 | Web Worker(시뮬레이션) + 메인(렌더링) 분리 |
-| 스케일 목표 | ~20개 엔티티 | 700+ 동적 + 200+ 정적 엔티티 동시 30FPS |
+| 영역 | v0.7.3 | v2.0 (EADSIM-Lite) |
+|------|--------|-------------------|
+| 교전 판정 | Pk × range_factor 단일 공식 | **PSSEK 테이블** (무기×위협×거리×접근각) |
+| 센서 | 거리 기반 즉시 탐지 | **SNR 4제곱 + 3단계 상태머신** |
+| 교전 교리 | 즉시 판정 | **S-L-S / S-S + BDA 지연** |
+| 운용원 | 없음 | **숙련도별 판단 시간** (15~50s) |
+| 동시교전 | 무제한 | **MFR 동시유도 상한** (포대별) |
+| 탄약 | 단순 차감 | **포대 구성 기반** (발사대×탄수) |
+| 추적 | 탐지=추적 | **탐지→추적→교전급** 전이 시간 |
+| 재밍 | 단일 계수 | **밴드별 감수성** (L/S/C/X) |
+| 유도 | PNG only | **PNG + CLOS** (천마) |
+| 메트릭 | 6개 | **EADSIM MOE/MOP 10개** |
+| 시뮬레이션 | 5초 스텝 | 프레임 단위 실시간 |
+| 요격미사일 | 없음 (Pk만) | PNG/CLOS 물리 비행 (시각화) |
+| 위협궤적 | 직선 | 포물선 탄도 + 순항 지형추종 |
+| 3D | CZML Entity | Primitive API(동적) + Entity(정적) |
+| 스케일 | ~20 엔티티 | 700+ 동적 + 200+ 정적 30FPS |
