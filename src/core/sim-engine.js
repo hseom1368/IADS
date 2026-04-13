@@ -49,12 +49,16 @@ export class SimEngine {
    * @param {'linear'|'killweb'} [options.architecture='linear']
    * @param {'high'|'mid'|'low'} [options.operatorSkill='mid']
    * @param {number} [options.jammingLevel=0]
+   * @param {number} [options.telemetryInterval=0.5] - 위협 텔레메트리 샘플링 간격 (s)
+   * @param {number} [options.telemetryMaxSamples=600] - 위협당 텔레메트리 링 버퍼 한계
    */
   constructor(registry, options = {}) {
     this.registry = registry;
     this.architecture = options.architecture ?? 'linear';
     this.operatorSkill = options.operatorSkill ?? 'mid';
     this.jammingLevel = options.jammingLevel ?? 0;
+    this.telemetryInterval = options.telemetryInterval ?? 0.5;
+    this.telemetryMaxSamples = options.telemetryMaxSamples ?? 600;
 
     this.state = SIM_STATE.READY;
     this.simTime = 0;
@@ -261,6 +265,13 @@ export class SimEngine {
       // RCS를 registry에서 조회 (하드코딩 제거)
       const phaseRCS = this.registry.getThreatRCS(threat.typeId, trajectory.phase);
       threat.updateFlight(threat.progress, trajectory, phaseRCS);
+
+      // ── 텔레메트리 샘플링 (Phase 1.9) ──────────────────────
+      // telemetryInterval 간격으로 시계열 저장. 그래프(시간-고도/거리/속도) 재생산용.
+      if (this.simTime - threat.lastTelemetryT >= this.telemetryInterval) {
+        const rangeToTargetKm = slantRange(threat.position, threat.targetPos);
+        threat.recordTelemetry(this.simTime, rangeToTargetKm, this.telemetryMaxSamples);
+      }
 
       // 지면 도달 → 관통 판정 전에 활성 요격미사일 판정 먼저 실행
       if (threat.progress >= 1 && threat.state !== 'intercepted') {

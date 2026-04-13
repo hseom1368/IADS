@@ -302,6 +302,7 @@ export class ThreatEntity extends BaseEntity {
     this.startPos = { ...startPos };
     this.targetPos = { ...targetPos };
     this.velocity = { dLon: 0, dLat: 0, dAlt: 0 };
+    this.currentSpeed = 0;     // m/s — 궤적 함수가 반환하는 현재 속도
     this.flightPhase = 0;
     this.currentRCS = 1.0;
     this.maneuvering = false;
@@ -310,21 +311,56 @@ export class ThreatEntity extends BaseEntity {
     this.progress = 0;        // 비행 진행률 (0~1)
     this.identifiedAs = null; // 식별된 위협 타입 (오인식 가능)
     this.prevPosition = { ...startPos }; // 이전 위치 (연속 충돌 감지용)
+
+    // ── 텔레메트리 링 버퍼 ──────────────────────────────────
+    // 주기적 샘플을 기록해 시간-고도/시간-거리/시간-속도 그래프용 시계열 제공
+    /** @type {Array<{t:number,lon:number,lat:number,alt:number,altKm:number,speed:number,mach:number,rangeToTargetKm:number,progress:number,phase:number,rcs:number,state:string}>} */
+    this.telemetry = [];
+    this.lastTelemetryT = -Infinity;
   }
 
   /**
    * 비행 진행 갱신
    * @param {number} newProgress - 새 진행률 (0~1)
    * @param {{ position: { lon: number, lat: number, alt: number }, speed: number, phase: number, rcsMultiplier: number }} trajectory
-   * @param {number} baseRCS - 기준 RCS (m²)
+   * @param {number} phaseRCS - 비행 단계별 RCS
    */
   updateFlight(newProgress, trajectory, phaseRCS) {
     this.progress = newProgress;
     this.prevPosition = { ...this.position };
     this.position = { ...trajectory.position };
     this.flightPhase = trajectory.phase;
+    this.currentSpeed = trajectory.speed ?? 0;
     // RCS: registry에서 조회한 위협 타입×비행 단계별 값 사용
     this.currentRCS = phaseRCS;
+  }
+
+  /**
+   * 텔레메트리 샘플 1건 기록 (링 버퍼, 오래된 샘플 자동 삭제)
+   *
+   * @param {number} simTime - 현재 시뮬레이션 시각 (s)
+   * @param {number} rangeToTargetKm - 표적까지 남은 직선거리 (km)
+   * @param {number} [maxSamples=600] - 링 버퍼 최대 크기
+   */
+  recordTelemetry(simTime, rangeToTargetKm, maxSamples = 600) {
+    this.telemetry.push({
+      t: simTime,
+      lon: this.position.lon,
+      lat: this.position.lat,
+      alt: this.position.alt,               // m
+      altKm: this.position.alt / 1000,
+      speed: this.currentSpeed,              // m/s
+      mach: this.currentSpeed / 340,
+      rangeToTargetKm,                       // km
+      progress: this.progress,
+      phase: this.flightPhase,
+      rcs: this.currentRCS,
+      state: this.state,
+    });
+    if (this.telemetry.length > maxSamples) {
+      this.telemetry.shift();
+    }
+    this.lastTelemetryT = simTime;
   }
 }
 

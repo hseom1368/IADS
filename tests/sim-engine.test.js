@@ -249,6 +249,57 @@ describe('SimEngine step integration', () => {
     expect(threat.position.lat).toBeLessThan(39.0); // 남하
   });
 
+  it('STEP 1: 텔레메트리 샘플링 — 0.5s 간격 기본', () => {
+    const engine = setupEngine();
+    engine.start();
+
+    const threat = new ThreatEntity('SRBM',
+      { lon: 127.0, lat: 39.0, alt: 0 },
+      { lon: 127.0, lat: 37.0, alt: 0 });
+    engine.addThreat(threat);
+
+    // 5초 시뮬레이션 (dt=0.5)
+    for (let i = 0; i < 10; i++) engine.step(0.5);
+
+    // 5초 / 0.5s 간격 = 약 10개 샘플 (첫 호출에서 -Infinity 조건으로 즉시 기록)
+    expect(threat.telemetry.length).toBeGreaterThanOrEqual(9);
+    expect(threat.telemetry.length).toBeLessThanOrEqual(11);
+
+    // 시간 단조 증가
+    for (let i = 1; i < threat.telemetry.length; i++) {
+      expect(threat.telemetry[i].t).toBeGreaterThan(threat.telemetry[i - 1].t);
+    }
+
+    // 표적까지 거리 단조 감소 (위협이 표적에 접근 중)
+    for (let i = 1; i < threat.telemetry.length; i++) {
+      expect(threat.telemetry[i].rangeToTargetKm).toBeLessThan(threat.telemetry[i - 1].rangeToTargetKm);
+    }
+  });
+
+  it('STEP 1: 텔레메트리 샘플링 간격 커스터마이즈', () => {
+    const engine = new SimEngine(registry, { operatorSkill: 'high', telemetryInterval: 2.0 });
+    const gp = new SensorEntity('GREEN_PINE_B', { lon: 127.0, lat: 36.5, alt: 200 });
+    const mfr = new SensorEntity('LSAM_MFR', { lon: 127.0, lat: 37.0, alt: 150 });
+    engine.addSensor(gp);
+    engine.addSensor(mfr);
+    engine.addC2(new C2Entity('KAMD_OPS', { lon: 127.0, lat: 36.8, alt: 100 }, 'high'));
+    engine.addC2(new C2Entity('ICC', { lon: 127.0, lat: 37.0, alt: 100 }, 'high'));
+    engine.addC2(new C2Entity('ECS', { lon: 127.0, lat: 37.0, alt: 100 }, 'high'));
+    engine.addBattery(new BatteryEntity('LSAM', { lon: 127.0, lat: 37.0, alt: 150 }, mfr.id, 'ecs_1', { ABM: 12, AAM: 12 }, 10));
+    engine.start();
+
+    const threat = new ThreatEntity('SRBM',
+      { lon: 127.0, lat: 39.0, alt: 0 },
+      { lon: 127.0, lat: 37.0, alt: 0 });
+    engine.addThreat(threat);
+
+    // 10초 시뮬레이션 → 2초 간격 → ~5개 샘플
+    for (let i = 0; i < 20; i++) engine.step(0.5);
+
+    expect(threat.telemetry.length).toBeGreaterThanOrEqual(4);
+    expect(threat.telemetry.length).toBeLessThanOrEqual(6);
+  });
+
   it('STEP 2: 센서 탐지 → 이벤트 발생', () => {
     const engine = setupEngine();
     engine.start();
