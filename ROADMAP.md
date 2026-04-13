@@ -211,20 +211,30 @@
 > 작업 명세서: `docs/tasks/phase2-multi-threat.md`
 > 권장 순서: 2.5(선행 일반화) → 2.1 → 2.2 → 2.3 → 2.4 → 2.x(스모크)
 
-### 2.5 킬체인 일반화 + 이벤트 보완 (선행)
+### 2.5 킬체인 일반화 + 다중 토폴로지 + 이벤트 보완 (선행)
 > Phase 2의 모든 하위 작업이 의존하는 토대. **먼저 수행.**
+> ⚠️ CRUISE/AIRCRAFT는 GREEN_PINE이 탐지 불가 → 다중 토폴로지가 반드시 필요.
 
+- [ ] `weapon-data.js`: `LINEAR_TOPOLOGY` → `LINEAR_TOPOLOGIES` (복수형)로 확장
+  - `abm`: GREEN_PINE → KAMD → ICC → ECS → 사수 (ballistic 전용)
+  - `aam`: MFR → ECS → 사수 (aircraft/cruise, 단축 킬체인)
+  - `<mfr>`/`<shooter>` 플레이스홀더 치환 지원
+- [ ] `registry.buildTopology('linear', threatCategory)` 시그니처 확장
 - [ ] `src/core/killchain.js` 신규: `LinearKillchainStrategy`
   - topology 엣지 순회 기반 `step()` (`KAMD_OPS/ICC/ECS` 문자열 분기 제거)
   - 노드 상태: PENDING → TRANSIT(링크) → QUEUED → PROCESSING → DONE
+  - C2 노드(큐 보유) vs 센서/사수 노드(즉시 통과) 구분
 - [ ] `sim-engine._stepKillchain()` → strategy 위임으로 축소
 - [ ] `threat.detectionSource` 필드 추가: 최초 탐지 센서 기록
-  - 킬체인 시작 조건을 `GREEN_PINE_B` 하드코딩에서 토폴로지 시작 노드 일치로 변경
+  - 킬체인 시작 조건을 토폴로지 시작 노드 일치로 판정
 - [ ] 미발행 이벤트 발행:
   - `BDA_STARTED` — `startBDA()` 직후
   - `AMMO_DEPLETED` — `fire()` 성공 후 launcher.remaining === 0
   - `SIMULTANEOUS_LIMIT_REACHED` — `capacity_or_ammo` WAIT 발생 시
-- [ ] `tests/killchain.test.js` 신규 (2-노드 직결 + 5-노드 Phase 1 동일 동작)
+- [ ] `killchain-step` 이벤트 페이로드 확장 (하위 호환)
+  - 기존 `stage` 상수 유지 + 신규 `from`/`to`/`phase` 추가
+  - index.html linkMap을 `from`/`to` 기반으로 교체
+- [ ] `tests/killchain.test.js` 신규 (2-노드 aam + 5-노드 abm 동시 검증)
 - [ ] 기존 Phase 1 스모크 테스트 무변경 통과
 
 ### 2.1 위협 다양화
