@@ -65,6 +65,8 @@ export class EngagementViz {
       color: color,
       scaleByDistance: new Cesium.NearFarScalar(5e3, 1.5, 5e6, 0.3),
       translucencyByDistance: new Cesium.NearFarScalar(5e3, 1.0, 8e6, 0.1),
+      // Cesium scene.pick()이 반환하는 메타데이터
+      id: { kind: 'threat', threatId, typeId, name },
     });
 
     const trail = this.trailLines.add({

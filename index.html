@@ -81,6 +81,7 @@ import { RadarViz } from './src/viz/radar-viz.js';
 import { NetworkViz } from './src/viz/network-viz.js';
 import { EngagementViz } from './src/viz/engagement-viz.js';
 import { HUD } from './src/viz/hud.js';
+import { ThreatInfoPanel } from './src/viz/threat-info-panel.js';
 
 import { Registry } from './src/core/registry.js';
 import { SimEngine, SIM_STATE } from './src/core/sim-engine.js';
@@ -96,6 +97,16 @@ const radarViz = new RadarViz(viewer);
 const networkViz = new NetworkViz(viewer);
 const engagementViz = new EngagementViz(viewer);
 const hud = new HUD();
+const threatInfoPanel = new ThreatInfoPanel();
+
+// ── 위협 클릭 픽킹 → 정보 패널 토글 ──────────────────────
+const clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+clickHandler.setInputAction((movement) => {
+  const picked = viewer.scene.pick(movement.position);
+  if (picked && picked.id && picked.id.kind === 'threat') {
+    if (engine) threatInfoPanel.open(picked.id.threatId, engine);
+  }
+}, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
 // ═══════════════════════════════════════════════════════════
 //  POSITIONS (Phase 1 배치)
@@ -282,6 +293,9 @@ function loop(timestamp) {
     hud.updateStatus(engine.state, engine.simTime, engine.architecture);
     const active = engine.threats.filter(t => t.state !== 'intercepted' && t.state !== 'leaked').length;
     hud.updateThreats(active, engine.threats.length);
+
+    // 위협 정보 패널 실시간 갱신 (열려 있을 때만)
+    threatInfoPanel.updateLive(engine);
     if (bat) {
       hud.updateBattery({
         launchers: bat.launchers,
@@ -337,6 +351,7 @@ document.getElementById('btnReset').addEventListener('click', () => {
   if (engine) {
     engine.reset();
     hits = 0; leaks = 0;
+    threatInfoPanel.close();
     // viz는 새로 생성하지 않음 (레이더/네트워크는 유지)
     engagementViz.destroy();
     // 재생성
