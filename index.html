@@ -265,41 +265,46 @@ function loop(timestamp) {
   const dt = Math.min((timestamp - lastTime) / 1000, 0.1);
   lastTime = timestamp;
 
-  if (engine && engine.state === SIM_STATE.RUNNING) {
-    engine.step(dt);
+  try {
+    if (engine && engine.state === SIM_STATE.RUNNING) {
+      engine.step(dt);
 
-    // 위협/요격미사일 위치 갱신 (라벨 상시: 고도 km + Mach)
-    for (const threat of engine.threats) {
-      if (threat.state !== 'intercepted' && threat.state !== 'leaked') {
-        engagementViz.updateThreat(threat.id, threat.position, {
-          speed: threat.currentSpeed,
-          altKm: threat.position.alt / 1000,
+      // 위협/요격미사일 위치 갱신 (라벨 상시: 고도 km + Mach)
+      for (const threat of engine.threats) {
+        if (threat.state !== 'intercepted' && threat.state !== 'leaked') {
+          engagementViz.updateThreat(threat.id, threat.position, {
+            speed: threat.currentSpeed,
+            altKm: threat.position.alt / 1000,
+          });
+        }
+      }
+      for (const intc of engine.interceptors) {
+        if (intc.state !== 'detonated' && intc.state !== 'missed') {
+          engagementViz.updateInterceptor(intc.id, intc.position);
+        }
+      }
+
+      // HUD 갱신
+      const bat = engine.batteries[0];
+      hud.updateStatus(engine.state, engine.simTime, engine.architecture);
+      const active = engine.threats.filter(t => t.state !== 'intercepted' && t.state !== 'leaked').length;
+      hud.updateThreats(active, engine.threats.length);
+
+      // Threat Tracking 패널 실시간 갱신 (목록 라이브값 + 그래프)
+      trackingPanel.updateLive(engine);
+      if (bat) {
+        hud.updateBattery({
+          launchers: bat.launchers,
+          active: bat.activeEngagements, max: bat.maxSimultaneous,
+          hits, leaks,
         });
       }
-    }
-    for (const intc of engine.interceptors) {
-      if (intc.state !== 'detonated' && intc.state !== 'missed') {
-        engagementViz.updateInterceptor(intc.id, intc.position);
-      }
-    }
 
-    // HUD 갱신
-    const bat = engine.batteries[0];
-    hud.updateStatus(engine.state, engine.simTime, engine.architecture);
-    const active = engine.threats.filter(t => t.state !== 'intercepted' && t.state !== 'leaked').length;
-    hud.updateThreats(active, engine.threats.length);
-
-    // Threat Tracking 패널 실시간 갱신 (목록 라이브값 + 그래프)
-    trackingPanel.updateLive(engine);
-    if (bat) {
-      hud.updateBattery({
-        launchers: bat.launchers,
-        active: bat.activeEngagements, max: bat.maxSimultaneous,
-        hits, leaks,
-      });
+      viewer.scene.requestRender();
     }
-
-    viewer.scene.requestRender();
+  } catch (err) {
+    // 프레임 루프가 죽지 않도록 예외를 로깅만 하고 계속 진행
+    console.error('[loop error]', err, err?.stack);
   }
 
   animFrameId = requestAnimationFrame(loop);
