@@ -86,6 +86,7 @@ Cesium 기반 3D 시각화, 단일 HTML+JS 프론트엔드, 백엔드 없음.
 - **통합 테스트**: 이벤트 순서뿐 아니라 물리 상태 검증 필수 (미사일 PIP 도달 여부, 위협 위치 정합성)
 - **시간 인과율 검증**: HIT 이벤트는 LEAKED보다 반드시 먼저 발생해야 함
 - **PIP 정합성 테스트**: predictInterceptPoint와 실제 궤적 함수(ballisticTrajectory 등)가 동일 궤적 사용하는지 확인
+- **텔레메트리 시리즈 테스트**: ThreatEntity 링 버퍼 동작, time-altitude/speed/range 시리즈 추출 정확도, sim-engine 자동 샘플링 간격 검증
 
 ## 커밋 메시지 규칙
 ```

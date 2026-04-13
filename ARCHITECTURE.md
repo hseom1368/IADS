@@ -13,7 +13,7 @@
 │  │  (PSSEK 테이블│  │            ← engagement-viz         │  │
 │  │   +포대구성   │  │            ← network-viz            │  │
 │  │   +센서3단계  │  │            ← hud                    │  │
-│  │   +관계 선언) │  │            ← interaction            │  │
+│  │   +관계 선언) │  │            ← threat-tracking-panel  │  │
 │  └──────┬───────┘  └──────────────▲───────────────────────┘  │
 │         │                         │ Float64Array              │
 │  ┌──────▼─────────────────────────┴───────────────────────┐  │
@@ -25,6 +25,7 @@
 │  │                         killchain (Strategy 패턴)        │  │
 │  │                         comms (링크지연+밴드별 재밍)      │  │
 │  │                         event-log ← metrics             │  │
+│  │                         telemetry (위협 시계열 API)      │  │
 │  └─────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -39,7 +40,7 @@
   1. **센서 상태머신 갱신** (sensor-model — 수평선 → 섹터 → SNR → 3단계 전이)
   2. **킬체인 진행** (killchain — C2 노드별 트리거→조건→응답)
   3. **교전 판정** (engagement-model — PSSEK 5단계, **다중 포대 선택**: selectBattery → selectLauncher)
-  4. **BDA 판정** (engagement-model — predetermined hit 적용 + CCD 보조)
+  4. **BDA 판정** (engagement-model — flyoutTime 경과 시 predetermined hit 적용. CCD는 BDA에서 분리됨, Phase 1.8)
   5. 위협 이동 (physics — **typeId별 궤적 분기**: 탄도 sin(π×t) / 순항 30m / 항공기)
   6. 요격미사일 유도 (physics — **hit-to-kill: PIP 직선 비행** / CLOS: 천마 전용)
   7. 메트릭 수집 (metrics)
@@ -334,7 +335,9 @@ evaluateEngagement(threat, battery, simTime):
   rangeBin = getRangeBin(d_pip, shooterTypeId)
   aspect = getAspectAngle(battery.position, threat)  // front/side/rear
   pk = registry.lookupPSSEK(shooterTypeId, missileType, threat.typeId, rangeBin, aspect)
-  pk *= (1 - jamming × 0.5)                // 재밍 보정
+  // 재밍 보정 — 센서 밴드별 감수성 (Phase 1.8): L밴드 0.3, S밴드 0.5, X밴드 0.8+
+  susceptibility = registry.getJammingSusceptibility(mfrSensor.typeId)
+  pk *= (1 - jamming × susceptibility)
   pk *= (1 - getEcmPkPenalty(threat))       // 대응수단 보정
   if architecture === 'killweb': pk *= 1.10  // 컴포지트 트래킹 보너스
 
@@ -386,14 +389,14 @@ updateInterceptor(interceptor, threat, dt):
     // PNG 비례항법 (근접신관 방식: 천궁, AAM, AIM-120 등)
     pngGuidance(interceptor, threat, dt, N=4)
 
-  // 결과 판정: flyoutTime 경과 시 발사 시점 predetermined 결과 적용
+  // 결과 판정: flyoutTime 경과 시 발사 시점 predetermined 결과 적용 (단일 트리거)
   if interceptor.elapsedTime >= interceptor.flyoutTime:
     if interceptor.predeterminedHit → HIT → 폭발(PIP 위치)
     else → MISS → 자폭
 
-  // CCD 보조: segment-to-segment (시각적 근접 시 조기 판정)
-  closestDist = closestApproachDistance(prev, cur, threatPrev, threatCur)
-  if closestDist <= killRadius → predetermined 결과 적용
+  // ※ Phase 1.8부터 CCD(checkInterceptResult)는 BDA 판정에서 완전 분리됨.
+  //   교전 결과는 flyoutTime 단일 트리거로만 적용. checkInterceptResult 함수는
+  //   @deprecated로 마킹되어 시각화 보조 전용으로 보존 (향후 제거 가능).
 
   // 위협 지면 도달 시: flyout 미경과 미사일 → MISS(too_late)
   if interceptor.fuelRemaining <= 0 → MISS (연료 소진) → 자폭
@@ -503,6 +506,58 @@ class Metrics {
 }
 ```
 
+### 2.10.1 core/telemetry.js — 위협 텔레메트리 시계열 API (Phase 1.9)
+
+`ThreatEntity.telemetry` 링 버퍼를 그래프 라이브러리 중립적 시리즈로 변환하여
+분석 패널·CSV 내보내기·Chart.js 등 어떤 소비자에게도 동일한 형식으로 제공.
+Cesium 무의존 (core 모듈).
+
+**데이터 모델** (entities.js):
+```javascript
+ThreatEntity {
+  currentSpeed: number,         // m/s — updateFlight() 시 trajectory.speed로 갱신
+  telemetry: Array<Sample>,     // 링 버퍼 (기본 maxSamples=600)
+  lastTelemetryT: number,       // 샘플링 간격 체크용 (-Infinity 초기화)
+
+  recordTelemetry(simTime, rangeToTargetKm, maxSamples = 600)
+}
+
+// 샘플 구조
+Sample {
+  t,                  // 시각 (s)
+  lon, lat, alt,      // 위치
+  altKm,              // 고도 (km)
+  speed,              // m/s
+  mach,               // = speed / 340
+  rangeToTargetKm,    // 표적까지 잔여 거리 (km)
+  progress, phase, rcs, state
+}
+```
+
+**자동 샘플링** (sim-engine.js):
+- 옵션: `telemetryInterval` (기본 0.5s), `telemetryMaxSamples` (기본 600)
+- `_stepThreats()`에서 `simTime - threat.lastTelemetryT >= interval` 시 자동 호출
+
+**API**:
+```javascript
+// 그래프 라이브러리 중립 시리즈 추출
+toTimeSeries(threat, field) → { t: number[], y: number[] }
+
+// 편의 함수 (필드 고정)
+timeAltitudeSeries(threat)    // y = altKm
+timeSpeedSeries(threat)       // y = mach
+timeRangeSeries(threat)       // y = rangeToTargetKm
+
+// 내보내기
+exportThreatTelemetry(threat) // 깊은 복사 dump
+exportAllTelemetry(threats)   // 다중 위협 dump
+getLatestSample(threat)       // 가장 최근 샘플 또는 null
+```
+
+**소비처**:
+- `viz/threat-tracking-panel.js` — 실시간 라이브 값 + Canvas 그래프
+- 향후: CSV/JSON 내보내기, Chart.js 분석 패널, 메트릭 수집
+
 ### 2.11 viz/ — Cesium 3D 시각화
 
 모든 viz 모듈은 core의 이벤트를 구독하여 렌더링만 수행.
@@ -513,11 +568,24 @@ class Metrics {
 - `engagement-viz.js`: PointPrimitiveCollection(위협/요격미사일) + PolylineCollection(궤적)
   - **S-L-S/S-S 교리 시각화**: S-S 시 2발 동시 발사 궤적 표시
   - **BDA 대기 표시**: 발사 후 BDA 지연 동안 '판정 대기' 상태 표시
+  - **상시 멀티라인 라벨** (Phase 1.9): 위협 옆에 이름 + 고도(km) + Mach 표시.
+    `updateThreat(id, pos, meta)` 시그니처 — meta로 매 프레임 라벨 갱신.
+    pixelOffset/horizontalOrigin LEFT로 점 옆 배치, distanceDisplayCondition 2000km.
 - `network-viz.js`: 데이터링크 시각화, **킬체인 진행 애니메이션** (C2 노드 순차 활성화)
-- `hud.js`: HTML overlay
+- `hud.js`: HTML overlay (좌측)
   - 킬체인 진행 상태 (탐지→추적→교전급→C2 분석→교전 승인→발사→BDA)
   - 포대 상태 (탄약 잔여량, 교전 큐, 동시교전 현황)
   - **EADSIM MOE/MOP 실시간 표시** (PRA, 누출률, S2S, 탄약 효율)
+- `threat-tracking-panel.js` (Phase 1.9): 우측 상시 패널 (280px)
+  - **데이터 소스**: `core/telemetry.js` API (시리즈 추출 + 라이브 샘플)
+  - **목록 섹션**: ACTIVE / TERMINATED 자동 분류
+    - 라이브 값: ID, 상태(FLY/ENG/HIT/LEAK), 고도, Mach
+    - 체크박스 다중 선택 (신규 스폰 시 5개까지 자동 선택)
+  - **분석 섹션**: METRIC 토글(ALT/SPD/RNG) + Canvas 2D 라인 그래프
+    - 다중 위협 중첩 표시, 위협별 색상 구분, DPR 대응
+    - 0.25s throttled redraw, 외부 의존성 0
+  - **이벤트 훅**: `onThreatSpawned`, `onThreatTerminated`, `updateLive(engine)`, `reset()`
+  - 향후 확장: Chart.js 교체 / CSV 내보내기 / 시나리오 비교
 - `interaction.js`: 호버 pick, 클릭 선택, 조건부 가시성
 
 ### 2.12 core/sim-worker.js — Web Worker

@@ -156,6 +156,53 @@
 - [x] Hit-to-kill 시각화: PNG tail-chase → PIP 직선 비행 (CLOS는 천마 전용)
 - [x] 폭발 위치: 지면 → PIP 근처 (interceptor.pipPosition)
 
+### 1.8 EADSIM-Lite 교전 판정 정합성 수정
+> CCD/PSSEK 충돌 구조 제거. 재밍 모델 정합화. CLAUDE.md 원칙 #10/#11 정착.
+
+- [x] CCD(checkInterceptResult)를 BDA 판정에서 분리 — flyoutTime 단일 트리거
+  - `sim-engine._stepBDA`: ccdResult 호출부 제거, 결과는 `flyoutExpired` 시점에만 적용
+  - `engagement-model.checkInterceptResult` @deprecated 명시 (시각화 보조 전용으로 보존)
+- [x] 재밍 Pk 보정: 고정 0.5 → `registry.getJammingSusceptibility()` 밴드별 적용
+  - L밴드(0.3, 강건) vs S밴드(0.5) vs X밴드(0.8+, 취약) 차등 반영
+- [x] PIP 로직 검증 (이미 정합 — 변경 없음)
+- [x] 밴드별 Pk 차이 검증 테스트 추가 (L밴드 vs S밴드 정량 비교)
+- [x] 222개 테스트 전체 통과
+- 작업 명세서: `docs/tasks/phase1.8-engagement-fix.md`
+
+### 1.9 위협 텔레메트리 + 분석 UI
+> 향후 EADSIM MOE/MOP 비교 분석 기반. 시간-고도/거리/속도 그래프 데이터 관리.
+
+#### 1.9.a 텔레메트리 데이터 수집 (core)
+- [x] `entities.js` ThreatEntity 확장:
+  - `currentSpeed` (m/s) — `updateFlight()`에서 `trajectory.speed` 저장
+  - `telemetry[]` 링 버퍼 (기본 maxSamples=600)
+  - `recordTelemetry(simTime, rangeToTargetKm, maxSamples)`
+  - 샘플 구조: `{ t, lon, lat, alt, altKm, speed, mach, rangeToTargetKm, progress, phase, rcs, state }`
+- [x] `sim-engine` 옵션 추가: `telemetryInterval`(기본 0.5s), `telemetryMaxSamples`(기본 600)
+- [x] `_stepThreats()`에서 간격 경과 시 자동 `recordTelemetry()` 호출
+- [x] `core/telemetry.js` 신규 — 그래프 라이브러리 중립 시리즈 API
+  - `toTimeSeries(threat, field)` → `{ t[], y[] }`
+  - `timeAltitudeSeries / timeSpeedSeries / timeRangeSeries`
+  - `exportThreatTelemetry / exportAllTelemetry / getLatestSample`
+- [x] 19개 단위 테스트 추가 (링 버퍼 동작, 시리즈 변환, sim-engine 통합)
+
+#### 1.9.b 위협 추적 UI (viz)
+- [x] `engagement-viz.js`: 3D 위협 옆 상시 멀티라인 라벨 (이름 + 고도 km + Mach)
+  - `updateThreat(id, pos, meta)` 시그니처 확장
+  - pixelOffset/horizontalOrigin 조정으로 점 옆 배치, distanceDisplayCondition 2000km
+- [x] `viz/threat-tracking-panel.js` 신규 — 상시 우측 패널 (280px)
+  - ACTIVE / TERMINATED 자동 분류, 체크박스 다중 선택 (신규 5개까지 자동 선택)
+  - METRIC 토글 (ALT/SPD/RNG) + Canvas 2D 라인 그래프
+  - DPR 대응, 0.25s throttled redraw, 위협별 색상 구분
+  - 외부 의존성 0 (CLAUDE.md "빌드 없음" 원칙 준수)
+- [x] `index.html` 레이아웃 재구성:
+  - 우측 `#rightPanel` 제거, ThreatTrackingPanel이 우측 차지
+  - Sim Speed / Operator Skill 슬라이더를 하단 `#controls`로 통합
+- [x] 이벤트 훅 연결: `threat-spawned` / `bda-result(HIT)` / `threat-leaked`
+- [x] 프레임 루프 try-catch 방어 (예외 시 console.error + 루프 유지)
+- [x] jsdom smoke test 7개 추가 (브라우저 없이 패널 검증)
+- [x] 248개 테스트 전체 통과
+
 ---
 
 ## Phase 2: 다중 위협 + PSSEK 다양성 + S-L-S/S-S 교리
