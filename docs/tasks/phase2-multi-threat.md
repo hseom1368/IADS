@@ -181,6 +181,207 @@ Phase 2.x  회귀 + 스모크
             - 320~370 테스트 목표
 ```
 
+### 0.10 작업 세부 명세 (회귀 게이트 + 테스트 파일 명명)
+
+**회귀 게이트 규칙** (K-1):
+- 각 sub-phase 종료 시점에 **Phase 1 전체 스모크 테스트 통과 의무**:
+  `npx vitest run tests/smoke-phase1.test.js` → 248개 테스트 무변경 통과
+- Phase 1 테스트 파일 **수정 금지** (CLAUDE.md "파일 수정 시 금지사항" 준수)
+- sub-phase 간 회귀 발견 시 즉시 중단 후 원인 분석, 다음 sub-phase 진입 금지
+
+**Phase 2 신규 테스트 파일 목록** (K-6, 기존 파일 수정 금지 원칙 준수):
+
+| 파일 | 대상 sub-phase | 검증 내용 |
+|---|---|---|
+| `tests/killchain.test.js` | 2.5 | topology 순회 일반화, 2-노드 · 5-노드 동시 검증 |
+| `tests/track-pool.test.js` | 2.5 | `buildVisibleTracks(architecture)` Linear/Kill-web 분기, staleness 보정 |
+| `tests/sector-policy.test.js` | 2.5 | rotating/staring 동적 전환, `isInSector` 통합 |
+| `tests/operating-mode.test.js` | 2.5 | 모드별 `trackCapacityAllocation`, 의사결정 시간 비용 |
+| `tests/dry-run.test.js` | 2.5 | `dryRunEvaluate` side-effect free, slotOccupancy 반환 |
+| `tests/threat-scheduler.test.js` | 2.1 | 파상/섞어쏘기/측면우회 wave 시간 경계, count×interval |
+| `tests/scenario-validator.test.js` | 2.1 | 수평선 체크 + 가용 토폴로지 사전 검증 |
+| `tests/sim-engine-multi.test.js` | 2.2 | 다중 포대 선택, 봉투 필터, 운용 모드 분기 |
+| `tests/engagement-plan.test.js` | 2.3 | SLS/SS/TS 교리 통합, firedShots 추적 |
+| `tests/engagement-sls.test.js` | 2.3 | 1발 MISS → BDA → 재발사 → HIT |
+| `tests/handoff.test.js` | 2.3 | L-SAM 봉투 이탈 → PAC-3 후속 교전 |
+| `tests/dual-mission.test.js` | 2.3 | L-SAM/천궁-II KAMD-MCRC 통제권 충돌 + 모드 전환 |
+| `tests/smoke-phase2.test.js` | 2.x | 파상공격 + 측면우회 E2E, Linear vs Kill-web 비교 |
+
+**Phase 2 완료 기준**:
+- 총 테스트 수: **320~370개** (Phase 1의 248개 + Phase 2 신규 약 80개)
+- 회귀: Phase 1 248개 모두 무변경 통과
+- 측면 우회 시나리오에서 Linear PRA ≈ 0.5, Kill-web PRA ≥ 0.85 (정량 차이 검증)
+
+### 0.11 데이터 스키마 정의 (누락분 보강)
+
+Phase 2.5 구현 시 이 스키마를 단일 신뢰 출처로 사용할 것.
+
+#### Track (Visible Track Pool 원소)
+
+```js
+Track = {
+  threatId: string,               // 위협 식별자
+  position: {lon, lat, alt},      // 마지막 알려진 위치 (지연된 값)
+  velocity: {dLon, dLat, dAlt},   // 마지막 알려진 속도
+  lastUpdate: number,             // 마지막 업데이트 시각 (simTime, s)
+  source: string,                 // 원천 센서 id (단일) 또는 composite:[ids]
+  staleness: number,              // simTime - lastUpdate (신선도, s)
+  state: 'DETECTED' | 'TRACKED' | 'FIRE_CONTROL',
+  confidence: number,             // 0~1, staleness × sensor 재밍 감쇠 반영
+}
+```
+
+**정보 신선도 → PIP 보정**: `staleness`가 크면 PIP 예측 시점의 위협 위치 오차가 커짐. Linear는 축간 16s + 처리 시간 누적으로 staleness 30~80s 수준, Kill-web은 1~3s 수준.
+
+#### engagementPlan (한 위협에 대한 교전 계획)
+
+```js
+threat.engagementPlan = {
+  shooterId: string,              // 배정된 포대 id
+  doctrine: 'SLS' | 'SS' | 'TS',  // 교리
+  totalShots: number,             // 계획된 총 발사 수 (SLS=1, SS=2, TS=3)
+  firedShots: number,             // 이미 발사한 수
+  shotInterval: number,           // 발사 간격 (s, launchInterval에서 도출)
+  lastShotTime: number | null,    // 마지막 발사 시각
+  bdaStrategy: 'after_each' | 'after_last',  // BDA 시점
+  firstMissReplan: boolean,       // 첫 발 MISS 시 재계획 허용 여부
+  createdAt: number,              // 계획 생성 시각
+}
+```
+
+**핵심 불변**: `firedShots > 0` 이면 재배정 금지 (lock). `firedShots === 0` 이면 매 프레임 재배정 허용 (Portfolio 전략 지원).
+
+#### dryRunEvaluate 시그니처
+
+```js
+/**
+ * 원자 평가 함수 — side-effect free.
+ * 배정 전략(GreedyLocal, PortfolioGlobal 미래)에 독립.
+ */
+function dryRunEvaluate(threat, battery, mfrSensor, registry, simTime, options) {
+  return {
+    feasible: boolean,               // FIRE 가능 여부
+    pk: number,                      // PSSEK Pk (재밍/ECM 보정 완료)
+    missileType: string,             // 'ABM' | 'AAM' 등
+    pip: { position, timeToReach, flyout },
+    launchTime: number,              // 현재 기준 발사까지 대기 (s)
+    bdaEndTime: number,              // 발사 후 BDA 종료 예상 시각
+    slotOccupancy: {                 // 이 교전이 점유할 자원
+      mfrTrack: number,              // MFR 트래킹 슬롯 차감
+      simultaneousEngagement: number,// 포대 동시교전 슬롯 차감
+      ammo: { [missileType]: number },
+    },
+    skipReason: string | null,       // feasible=false인 사유
+    // 예: 'envelope_miss', 'no_fire_control', 'ammo_depleted', 'horizon_out'
+  };
+}
+```
+
+#### BatteryEntity.slots (자원 분리 모델)
+
+```js
+BatteryEntity.slots = {
+  mfrTrack:               { used: 0, capacity: 30 },  // MFR 트래킹 용량
+  simultaneousEngagement: { used: 0, capacity: 10 },  // 동시교전 상한 (MFR 제한)
+  // 향후 추가 가능 (Phase 5+): dataLinkBandwidth, operatorAttention
+}
+
+// fire()/completeEngagement() 가 slots.used를 갱신
+// dryRunEvaluate 가 slotOccupancy로 사전 점유량 반환
+```
+
+#### validateWave (시나리오 검증 헬퍼)
+
+```js
+/**
+ * 시나리오 wave가 물리적으로 탐지 가능한지 사전 검증.
+ * Phase 2.1의 ThreatScheduler가 실행 전 호출.
+ */
+function validateWave(wave, engine) {
+  for (const sensor of engine.sensors) {
+    const maxRange = registry.effectiveMaxDetectionRange(
+      sensor.typeId, wave.startPos.alt, sensor.position.alt
+    );
+    const distance = slantRange(sensor.position, wave.startPos);
+    if (distance <= maxRange) {
+      return { ok: true, firstDetector: sensor.id };
+    }
+  }
+  return {
+    ok: false,
+    warning: `No sensor can detect ${wave.typeId} at altitude ${wave.startPos.alt}m
+              from ${wave.startPos}. Nearest horizon: ${nearest}km`,
+  };
+}
+
+// registry.effectiveMaxDetectionRange 신규:
+//   = min(sensor.ranges.detect, radarHorizon(ant, target))
+```
+
+### 0.12 결정 이력 (ADR 형식)
+
+각 결정의 배경/대안/근거/결과를 명시하여 향후 "왜 이렇게 했는지" 추적 가능.
+
+#### ADR-001: 컨텍스트 관리 — weapon-data.js + weapon-specs.md + task md 동일 커밋 (K-2 재설계)
+
+- **배경**: §0 보강 시 세 파일이 동기화되지 않으면 새 세션이 구버전과 신버전 사이에서 혼란
+- **대안 A**: task md만 갱신 (새 세션이 수동 반영) — 재해석 오차 위험
+- **대안 B**: weapon-specs.md만 갱신 (의도 망실)
+- **결정 (옵션 1+2)**: 세 파일 모두 같은 커밋에 묶기
+- **근거**: SSOT 원칙 + 컨텍스트 완결성. 새 세션이 한 커밋 스냅샷으로 전체 상태 파악
+- **결과**: 커밋 `e4739b8`, `ee265c4` 에 반영 완료
+- **문서 신뢰 순서**: §0 > weapon-specs.md §14 > weapon-data.js > ARCHITECTURE.md/ROADMAP.md > phase2-history.md
+
+#### ADR-002: GREEN_PINE fire control — 능력 부여 + 토폴로지 분기 (사용자 결정)
+
+- **배경**: EL/M-2080은 원래 Arrow 연계용 FCR, 한국은 Arrow 미도입으로 잠재 능력 휴면
+- **대안 A**: 능력 부여 + 토폴로지 분기 (Linear 미활용 / Kill-web 활용)
+- **대안 B**: 능력 자체 미부여 (현실 반영)
+- **대안 C**: 능력 부여 + 양쪽 활용 (비현실)
+- **결정**: 옵션 A
+- **근거**: 한국 현실 재현 + Kill-web 우위 정량화. 하드웨어는 가능한데 C2 구조가 막는 상황을 시뮬레이션이 드러냄
+- **결과**: weapon-data.js `GREEN_PINE_B.ranges.fireControl = 500` ✅. Linear 토폴로지 `kamd_ballistic`에서 fire control 트랙은 사수 visibleTracks 미포함
+
+#### ADR-003: Linear vs Kill-web 알고리즘 — 단일 함수 + buildVisibleTracks 분기
+
+- **배경**: 이전 5차 논의에서 "GreedyLocal vs PortfolioGlobal" 두 알고리즘으로 분리 시도 → 실제 차이는 알고리즘이 아니라 정보 접근 범위
+- **대안 A**: 두 전략 클래스 분리 (복잡도 ↑, EADSIM 철학 위반)
+- **대안 B**: 단일 알고리즘 + `buildVisibleTracks(architecture)` 분기
+- **결정**: 옵션 B
+- **근거**: EADSIM 철학 = 시뮬레이션 프레임워크. Linear에서도 사람이 합리적 최적화 가능, 단 정보가 제한됨. 알고리즘 통일 + 정보 차등으로 표현
+- **결과**: CLAUDE.md 원칙 #13으로 박제. §0.2 Visible Track Pool 모델
+
+#### ADR-004: Operating Mode 비용 — AESA 빔 전환 0, 의사결정 시간만 비용
+
+- **배경**: 이전 가정 "탄도탄 ↔ 항공기 모드 전환 10초" 는 AESA microsecond 빔 전환 사실과 모순
+- **대안 A**: `modeTransitionTime: 10s` 필드 유지 (잘못된 모델)
+- **대안 B**: 물리 비용 0 + 운용원 의사결정 시간(operatorSkill 기반) + trackCapacity 재배분
+- **결정**: 옵션 B
+- **근거**: 공개 자료 (Wikipedia Phased array, Lockheed Martin AN/SPY-1) — AESA는 50ms 검색 + 10ms 추적 + 5ms 유도 인터리브 가능. 모드 전환 cost는 사람 판단 + 자원 재배분
+- **결과**: CLAUDE.md 원칙 #14. weapon-specs.md §14.3/§14.4
+
+#### ADR-005: Phase 2 작업 범위 — 옵션 A (Kill-web 동시 구현)
+
+- **배경**: Phase 2에서 Linear만 구현하고 Kill-web을 Phase 3로 미룰지의 결정
+- **대안 A (옵션 A)**: Linear + Kill-web 모두 Phase 2에 구현 (작업량 큼, Phase 3 부담 작음)
+- **대안 B (옵션 B)**: Linear만 + 인터페이스만 Kill-web (stub, 검증 불가)
+- **대안 C (옵션 C)**: Linear만 + 리팩토링 Phase 3 (리팩토링 부담 큼)
+- **결정**: 옵션 A
+- **근거**: 
+  - 컨텍스트 지속성 보호 (stub은 의도 망실)
+  - Phase 2 종료 시점에 시뮬레이션 핵심 목적(둘의 비교) 즉시 검증
+  - track-pool 모델의 양면 검증 (한쪽만 만들면 추상화가 적절한지 검증 불가)
+- **결과**: §0.9 Phase 2.5의 `track-pool.js`에 Linear + Kill-web 분기 모두 구현. Phase 3는 IAOC/EOC 데이터 추가 + 시각화/메트릭만 수행
+
+#### ADR-006: CRUISE_MISSILE 고도 100m + 발사원점 85km (사용자 결정)
+
+- **배경**: 이전 가정 "고도 30m + 발사원점 ≤40km" 는 SHORAD 대상 초저고도 특수 케이스로 너무 제한적
+- **대안 A**: 고도 30m, 출발점 ≤40km (초저고도 특수)
+- **대안 B**: 고도 100m, 출발점 85km (LSAM_MFR 수평선 84.6km 내)
+- **결정**: 옵션 B
+- **근거**: 우리 무기체계 대응 범위에 적합 + 수평선 물리 정확 (188m 안테나 vs 100m 표적 = 84.6km)
+- **결과**: §0.6 측면 우회 시나리오, weapon-specs.md §14.6 좌표 반영
+
 ---
 
 > **§1 이하의 이전 작업 명세서는 `phase2-history.md`로 이동되었습니다.**

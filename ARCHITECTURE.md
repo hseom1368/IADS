@@ -402,56 +402,109 @@ updateInterceptor(interceptor, threat, dt):
   if interceptor.fuelRemaining <= 0 → MISS (연료 소진) → 자폭
 ```
 
-### 2.7 core/killchain.js — Strategy 패턴
+### 2.7 core/killchain.js — Strategy 패턴 (ADR-003: 단일 알고리즘)
 
-**ArchitectureStrategy (추상 인터페이스)**:
-```
-ArchitectureStrategy {
-  buildTopology(registry, entities)
-  runKillchain(threat, sensors, c2s, batteries)
-  selectShooter(threat, candidates)
-  identifyThreatType(threat, sensors)
-  fuseTracks(threat, sensorList)
-  updateCop(entities)
-  getDoctrineForThreat(threat, battery)
-}
-```
+> **핵심 원칙**: Linear와 Kill-web의 차이는 **알고리즘이 아니라 정보 풀의 범위와 신선도**입니다.
+> 사수 선정 함수(`selectShooter`)는 **한 개**. `buildVisibleTracks(architecture)` 만 분기.
+> 상세: `CLAUDE.md` 원칙 #12~#14, `docs/tasks/phase2-multi-threat.md` §0.2
 
-**LinearKillChain** (ArchitectureStrategy 구현):
+**LinearKillchainStrategy (topology 엣지 순회)**:
 ```
-GREEN_PINE 탐지 → 탐지→추적 전이(10s)
-  ↓ (16s 링크)
-KAMD_OPS: 시스템(5~10s) + 운용원(15~50s)
-  ↓ (16s 링크)
-ICC: 시스템(3~5s) + 운용원(2~10s)
-  ↓ (1s 링크)
-ECS: 시스템(1~2s) + 운용원(1~3s)
-  ↓ 포대 MFR 병행 가동 → 교전급 추적 확립(8s)
-  ↓ (1s 링크)
-발사대 → PSSEK 5단계 교전 판정 → 발사
+kamd_ballistic 토폴로지 (탄도탄 전용, KAMD축):
+  GREEN_PINE 탐지 → 탐지→추적 전이(10s)
+    ↓ (16s 링크, longRange)
+  KAMD_OPS: 시스템(5~10s) + 운용원(15~50s)
+    ↓ (16s 링크, longRange)
+  ICC: 시스템(3~5s) + 운용원(2~10s)
+    ↓ (1s 링크, shortRange)
+  ECS: 시스템(1~2s) + 운용원(1~3s)
+    ↓ 포대 MFR 병행 가동 → 교전급 추적 확립(8s)
+    ↓ (1s 링크, shortRange)
+  발사대 → dryRunEvaluate → PSSEK 5단계 판정 → 발사
 
 총 S2S: 84~137초 (고숙련~저숙련)
-```
-- identifyThreatType: MLRS → **70% SRBM 오인식**
-- fuseTracks: 융합 없음 (단일 센서), 오상관 5%, 미상관 10%
-- 다축 독립 킬체인 → 중복교전
 
-**KillWebKillChain** (ArchitectureStrategy 구현):
+battery_autonomous_short 토폴로지 (자유교전, 예외 모드):
+  MFR → (0.5s internal) → ECS → (1s shortRange) → 사수
+  총 S2S: 5~15초 (센서 전이 제외)
 ```
-모든 센서 → IAOC 자동 융합(1s) → 컴포지트 트래킹
-  → IAOC 최적 사수 선정(1~3s)
-  → EOC(1~3s) → 발사
+
+**KillWebKillchainStrategy (같은 엣지 순회 구조 + 모든 링크 < 1s)**:
+```
+kill_web 토폴로지:
+  모든 센서 → IAOC 자동 융합(1s) → 컴포지트 트래킹
+    → IAOC 최적 사수 선정(1~3s)
+    → EOC(1~3s) → 사수
 
 총 S2S: 5~9초
 ```
-- identifyThreatType: 2개+ 센서 100% 정확, 단일 10% 오인식
-- fuseTracks: 자동 상관, 오상관 1%, 미상관 2%, **Pk +10%**
-- updateCop: 매 스텝 auno/교전상태/센서상태 전체 공유
-- selectShooter:
-  ```
-  score = base_pk × (1/거리) × 탄약비율 × 부하계수 + friendly_bonus(0.15)
-  base_pk = PSSEK 최대값 (최적 거리구간·정면 기준)
-  ```
+
+**사수 선정: 단일 함수 `selectShooter()`**:
+```js
+function selectShooter(threat, simTime, architecture) {
+  // ADR-003: 아키텍처별 분기는 이 한 줄뿐
+  const pool = buildVisibleTracks(shooter, simTime, architecture);
+  
+  const candidates = [];
+  for (const battery of allBatteries) {
+    const track = pool.findTrack(threat.id);
+    if (!track) continue;                    // 정보 없음 → 후보 아님
+    
+    const eval = dryRunEvaluate(threat, battery, mfrSensor, registry, simTime);
+    if (!eval.feasible) continue;
+    
+    // 점수 공식 (양쪽 아키텍처 공통)
+    const score =
+      eval.pk * W_PK
+      + ammoRatio(battery) * W_AMMO
+      + (1 - loadRatio(battery)) * W_LOAD
+      + (1 / distance) * W_DIST
+      - priorMissCount[battery] * W_MISS_PENALTY
+      - (track.staleness * W_STALENESS);    // 신선도 페널티
+    
+    candidates.push({battery, score});
+  }
+  return candidates.sort((a,b) => b.score - a.score)[0]?.battery;
+}
+```
+
+**`buildVisibleTracks(shooter, simTime, architecture)` (ADR-003 핵심 분기)**:
+```js
+if (architecture === 'linear') {
+  // 자기 포대 MFR이 직접 본 트랙 + 자기 C2축이 전달한 트랙 (링크 지연 누적)
+  pool ∪= shooter.battery.mfr.fireControlTracks;
+  for (const axisCommand of shooter.battery.assignedC2Axis) {
+    for (const cmd of axisCommand.commandQueue) {
+      const arrival = cmd.sentTime + accumulatedLinkDelay(axis);
+      if (arrival <= simTime) pool ∪= cmd.trackData;
+    }
+  }
+}
+else if (architecture === 'killweb') {
+  // 모든 센서의 fireControl 트랙, 1초 미만 지연
+  for (const sensor of ALL_SENSORS) {
+    for (const track of sensor.fireControlTracks) {
+      if (simTime - track.lastUpdate >= 1.0) pool ∪= track;  // Link-16 latency
+    }
+  }
+}
+```
+
+**identifyThreatType / fuseTracks (아키텍처별 파라미터 차이)**:
+- Linear: 단일 센서, 오상관 5%, 미상관 10%, MLRS→SRBM 오인식 70%
+- Kill-web: 자동 상관, 오상관 1%, 미상관 2%, 2개+ 센서 100% 정확, Pk +10%
+
+**4층위 차이 모델 (ADR-003 근거)**:
+1. **링크 지연**: Linear 16/1/0.5s vs Kill-web < 1s
+2. **사람 판단 단계**: Linear 3개(KAMD/ICC/ECS) vs Kill-web 2개(IAOC/EOC)
+3. **판단 depth**: Linear 단계별 상세 판단 vs Kill-web 자동화 후 승인
+4. **정보 신선도**: Linear staleness 30~80s vs Kill-web 1~3s (PIP 예측 오차 영향)
+
+**수수께끼 해결** (왜 같은 알고리즘이 다른 결과를 내는가):
+- 같은 `selectShooter()` 호출에서도 `pool`에 들어 있는 트랙의 범위·개수·신선도가 다름
+- Linear는 GREEN_PINE의 fire control 트랙을 못 봄 (토폴로지가 전달하지 않음)
+- Linear는 인접 포대 MFR이 본 트랙도 못 봄
+- 결과: 같은 알고리즘이 "사용 가능한 입력이 적어서" 열세
 
 ### 2.8 core/comms.js — 통신 채널 모델
 

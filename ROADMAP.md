@@ -205,20 +205,56 @@
 
 ---
 
-## Phase 2: 다중 위협 + PSSEK 다양성 + S-L-S/S-S 교리
+## Phase 2: 다중 위협 + PSSEK 다양성 + Linear vs Kill-web 비교 기반
 > 목표: 복수 위협, 다양한 PSSEK 조합, BDA 재발사, 동시교전 상한 검증
+> **+** Linear와 Kill-web 양쪽 아키텍처 구현 (ADR-005, 옵션 A)
 > **전제조건**: Phase 1.7 보완 완료 (다중 포대, 위협 궤적 분기, 레이더 수평선, TEL 개별화) ✅
-> 작업 명세서: `docs/tasks/phase2-multi-threat.md`
-> 권장 순서: 2.5(선행 일반화) → 2.1 → 2.2 → 2.3 → 2.4 → 2.x(스모크)
+> 작업 명세서: `docs/tasks/phase2-multi-threat.md` §0 (Phase 2.0 자료 조사 + 모델링 결정)
+> 권장 순서: **2.0(자료 조사) → 2.5(일반화+인프라) → 2.1 → 2.2 → 2.3 → 2.4 → 2.x(스모크)**
 
-### 2.5 킬체인 일반화 + 다중 토폴로지 + 이벤트 보완 (선행)
+### 2.0 자료 조사 + 개념 재정의 ✅
+> 공개 자료 기반 모델링 결정. 6차 사용자 검토 완료.
+> 상세: `docs/tasks/phase2-multi-threat.md` §0, `docs/weapon-specs.md` §14
+
+- [x] L-SAM / 천궁-II / PAC-3 / GREEN_PINE 사양 재조사
+- [x] Linear vs Kill-web 본질 재정의 (정보 풀의 범위와 신선도, 알고리즘 단일)
+- [x] GREEN_PINE fire control 능력 처리 (능력 부여 + 토폴로지 분기)
+- [x] AESA 모드 전환 모델 재정의 (물리 비용 0, 의사결정 시간만 비용)
+- [x] 운용 모드 (Operating Mode) + Sector Policy 개념 신설
+- [x] 측면 우회 시나리오 Phase 2 필수 데모로 채택
+- [x] weapon-data.js: GREEN_PINE fireControl 500km, L-SAM ABM Hmin 40km
+- [x] weapon-specs.md §14 신규 (9개 sub-섹션, 구체 좌표 포함)
+- [x] phase2-multi-threat.md §0 신설 (ADR 형식 결정 이력 포함)
+- [x] CLAUDE.md 원칙 #12~#14 추가 (Linear vs Kill-web / 단일 함수 / 운용 모드)
+- [x] CLAUDE.md "작업 패턴" 섹션 신규 (Stream/Context 효율)
+
+### 2.5 킬체인 일반화 + 인프라 + 센서 운용 모드 모델 (선행)
 > Phase 2의 모든 하위 작업이 의존하는 토대. **먼저 수행.**
 > ⚠️ CRUISE/AIRCRAFT는 GREEN_PINE이 탐지 불가 → 다중 토폴로지가 반드시 필요.
+> ADR-003: Linear/Kill-web 알고리즘은 단일, `buildVisibleTracks(architecture)`만 분기.
 
 - [ ] `weapon-data.js`: `LINEAR_TOPOLOGY` → `LINEAR_TOPOLOGIES` (복수형)로 확장
-  - `abm`: GREEN_PINE → KAMD → ICC → ECS → 사수 (ballistic 전용)
-  - `aam`: MFR → ECS → 사수 (aircraft/cruise, 단축 킬체인)
+  - `kamd_ballistic`: GREEN_PINE → KAMD → ICC → ECS → 사수 (ballistic, KAMD축)
+  - `battery_autonomous_short`: MFR → ECS → 사수 (자유교전 모드, 2노드 단축)
+  - `battery_autonomous_icc`: MFR → ICC → ECS → 사수 (자유교전, 대대급 유지)
+  - `mcrc_abt`: Phase 4에서 정의 (FPS117 → MCRC → ICC → ECS → 사수)
   - `<mfr>`/`<shooter>` 플레이스홀더 치환 지원
+- [ ] `src/core/track-pool.js` 신규 (ADR-003 핵심): `buildVisibleTracks(shooter, simTime, architecture)`
+  - Linear 분기: 자기 포대 MFR + 자기 C2축 명령 트랙 (링크 지연 누적)
+  - Kill-web 분기: ALL 센서 fire control 트랙 (1초 미만 지연)
+  - Track 객체에 `lastUpdate`, `source`, `staleness` 메타데이터
+  - staleness 기반 PIP 예측 오차 보정
+- [ ] `src/core/sector-policy.js` 신규: 동적 섹터 정책 (rotating/staring)
+  - SensorEntity.runtimeState.sectorPolicy 필드 추가
+  - 기존 정적 `azimuthHalf` → 동적 정책으로 마이그레이션
+  - 물리 함수 `isInSector()`가 동적 정책 참조
+- [ ] `src/core/operating-mode.js` 신규: 자원 배분 정책 (AESA 빔 전환 비용 0)
+  - L-SAM/천궁-II/PAC-3의 `operatingModes` 정의 (ballistic_focus/abt_focus/hybrid)
+  - `trackCapacityAllocation` 모델 (ballistic vs aircraft 슬롯 분배)
+  - 모드 전환 비용 = 운용원 의사결정 시간 (operatorSkill 기반)
+- [ ] `engagement-model.js`: `dryRunEvaluate()` 분리 (side-effect free 원자 평가)
+  - 반환: feasible, pk, pip, launchTime, bdaEndTime, slotOccupancy, skipReason
+- [ ] `BatteryEntity.slots` 분리 모델: mfrTrack vs simultaneousEngagement
 - [ ] `registry.buildTopology('linear', threatCategory)` 시그니처 확장
 - [ ] `src/core/killchain.js` 신규: `LinearKillchainStrategy`
   - topology 엣지 순회 기반 `step()` (`KAMD_OPS/ICC/ECS` 문자열 분기 제거)
@@ -333,6 +369,9 @@
 - [ ] KF-16 (AIM-120, 공대공)
 - [ ] GREEN_PINE_C + FPS117 + TPS880K 센서 추가
 - [ ] MCRC, ARMY_LOCAL_AD C2 노드 추가
+- [ ] **`mcrc_abt` 토폴로지 정의** (FPS117 → MCRC → ICC → ECS → 사수)
+  - Phase 2의 `battery_autonomous_*`는 예외 모드로 유지, `mcrc_abt`가 ABT 정상 모드
+  - dual-mission 사수(L-SAM/천궁-II)의 KAMD축-MCRC축 통제권 협조 로직 추가
 
 ### 4.2 한반도 배치
 - [ ] 5개 방어구역 (전방/수도권북/수도권남/중부/남부)
@@ -354,6 +393,10 @@
   - ※ 기본 수평선(지구 곡률)은 Phase 1.7에서 구현 완료. Phase 5는 지형 상세화.
 - [ ] 밴드별 재밍 상세 모델 (시커 밴드별 차등: IIR 면역, Ka밴드 취약)
 - [ ] 대응수단 상세 (채프/플레어 타이밍, 디코이)
+- [ ] **궤적 함수 일반화**: `ballisticTrajectory`/`cruiseTrajectory` 내부 하드코딩 경계(0.25/0.70, 0.85/0.92)를 `flightProfile.phases[].range` 데이터 참조로 대체
+  - Phase 2.0 MEDIUM 이슈 해결의 후속 작업 (현재는 경계값 일치로 우회)
+- [ ] **L-SAM MFR 탐지거리 정밀화**: 공개 보고치 600km(AESA)와 현재 보수치 310km 간 간극 재검토
+  - Phase 2.0에서 회귀 리스크로 보류, Phase 5 정밀화 시점에 처리
 
 ### 5.2 통신 모델
 - [ ] 링크별 지연 상세 파라미터
