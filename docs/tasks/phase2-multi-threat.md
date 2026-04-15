@@ -74,6 +74,13 @@ LSAM.operatingModes = {
 }
 ```
 
+**용어 구분 — 하드웨어 상한 vs 운용 모드별 분배** (F-02 해결):
+- **하드웨어 상한 (static capacity)**: `weapon-data.js`의 `LSAM_MFR.trackCapacity = { aircraft: 100, ballistic: 10 }` — 센서 자체가 물리적으로 지원 가능한 최대 트래킹 수. 불변.
+- **운용 모드별 분배 (dynamic allocation)**: 위 `operatingModes[mode].trackCapacity` — 특정 모드에서 실제로 할당하는 분배량. 가변.
+- **제약**: 각 운용 모드 분배량 ≤ 하드웨어 상한 (단일 모드 기준). 여러 모드를 동시에 운용하지 않으므로 **합계 제약이 아닌 "현재 활성 모드의 분배량 ≤ 하드웨어 상한"**.
+  - 예: `LSAM_MFR` 하드웨어 `aircraft: 100`, `abt_focus` 모드에서 `aircraft: 20` 할당 → 보수 분배 (MFR 여유 남김)
+  - 예: `LSAM_MFR` 하드웨어 `ballistic: 10`, `ballistic_focus` 모드에서 `ballistic: 10` 할당 → full use
+
 **모드 전환 비용**:
 - 물리적: 0 (AESA microsecond)
 - 의사결정: operatorSkill 기반 (high 5s / mid 10s / low 20s)
@@ -142,13 +149,17 @@ Kill-web:
 ```
 Phase 2.0 ✅ 완료 — 자료 조사 + weapon-specs.md/weapon-data.js/task md 보강
 
-Phase 2.5  킬체인 일반화 + 인프라 + 센서 운용 모드 모델
+Phase 2.5  킬체인 일반화 + 인프라 + 센서 운용 모드 모델 + 재현성 기반
+            - rng.js 신규 (seeded PRNG, Mulberry32 or xorshift) — ADR-007, Phase 3 전제
+              · sim-engine 옵션 rngSeed 추가
+              · 모든 Math.random 호출을 주입된 rng로 교체
+              · 같은 시나리오 + 같은 시드 → 동일 결과 보장
             - 다중 토폴로지 (LINEAR_TOPOLOGIES + axis 필드, battery_autonomous_*)
             - killchain.js (Strategy 패턴)
-            - track-pool.js (Linear + Kill-web 분기 모두 구현)
+            - track-pool.js (Linear + Kill-web 분기 모두 구현, 상관/미상관 확률 포함)
             - sector-policy.js (rotating/staring 동적 전환)
             - operating-mode.js (자원 배분 정책)
-            - dryRunEvaluate 분리
+            - dryRunEvaluate 분리 (roeCheck 훅 포함, PIP 기반 ROE 명시)
             - GREEN_PINE fire control 분기 활성화
 
 Phase 2.1  위협 다양화 + 표준 시나리오
