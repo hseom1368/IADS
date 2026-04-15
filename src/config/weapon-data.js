@@ -20,10 +20,17 @@ export const SENSOR_TYPES = Object.freeze({
   GREEN_PINE_B: {
     name: 'Green Pine Block-B',
     band: 'L',
-    ranges: { detect: 900, track: 600, fireControl: null },
-    transitionTime: { detectToTrack: 10 },
+    // EL/M-2080은 원래 Arrow 미사일 연계용 fire control radar로 설계됨
+    // (search/detection/tracking/missile guidance 동시 수행).
+    // 한국 운용 현실: Arrow 미도입으로 하드웨어 능력은 있으나 C2 토폴로지가
+    // 이 능력을 활용하지 못함. Phase 2 모델링:
+    //   - Linear 토폴로지: GREEN_PINE fire control 트랙은 사수의 visibleTracks에 포함되지 않음
+    //     → 능력은 선언되지만 실질 미활용 (조기경보 전용)
+    //   - Kill-web 토폴로지: IAOC가 전체 센서 트랙 통합 → GREEN_PINE fire control 트랙 활용 가능
+    ranges: { detect: 900, track: 600, fireControl: 500 },
+    transitionTime: { detectToTrack: 10, trackToFC: 12 },
     trackCapacity: 30,
-    role: 'early_warning',
+    role: 'early_warning',  // Phase 2.5에서 'early_warning_and_fire_control'로 확장 예정
     detectableThreats: ['SRBM'],
     minAltitude: 5000,
     jammingSusceptibility: 0.3,
@@ -63,7 +70,9 @@ export const SHOOTER_TYPES = Object.freeze({
     name: 'L-SAM',
     missiles: {
       ABM: {
-        engagementEnvelope: { Rmin: 20, Rmax: 150, Hmin: 50, Hmax: 60 },
+        // 봉투 Hmin: Phase 2.0 자료 조사 결과 40km로 수정 (이전 50km는 보수)
+        // 출처: 공개 자료 "intercept ballistic missiles ... at altitudes between 40 and 60 kilometers"
+        engagementEnvelope: { Rmin: 20, Rmax: 150, Hmin: 40, Hmax: 60 },
         missileSpeed: 3100,      // m/s (Mach 9)
         pssekTable: {
           SRBM: {

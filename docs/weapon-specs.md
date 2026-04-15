@@ -21,12 +21,22 @@
 - **주파수**: L밴드 (500~2000 MHz)
 - **탐지거리**: 900km (탄도탄 RCS 0.1m² 기준)
 - **추적거리**: 600km
-- **교전급 추적**: 해당 없음 (조기경보 전용, 큐잉 제공)
+- **교전급 추적거리**: **500km** (Phase 2.0 자료 조사로 갱신)
 - 추적용량: 30기 동시 (Mach 8.8까지), 스캔율: 회전형
-- 역할: **early_warning** (탄도탄 조기경보 + 큐잉)
+- 역할: **early_warning** + **fire control 능력 보유** (하드웨어 기준)
+  - 원래 EL/M-2080은 Arrow 미사일 시리즈 연계용 fire control radar로 설계됨
+  - search/detection/tracking/missile guidance 4개 모드를 동시 수행 가능
+  - 한국 도입 시 Arrow 미도입 → fire control 능력은 있으나 C2 토폴로지가
+    이 능력을 활용하지 못함 (현실: 조기경보 전용 운용)
+  - **Phase 2 모델링 결정**:
+    - Linear 토폴로지(`kamd_ballistic`)에서 GREEN_PINE fire control 트랙은
+      사수의 visibleTracks에 포함되지 않음 → 잠재 능력 비활용
+    - Kill-web 토폴로지에서 IAOC가 모든 센서 fire control 트랙 통합 → 활용
+  - 출처: Wikipedia EL/M-2080, IAI, Missile Defense Advocacy
 - 탐지가능위협: SRBM
 - 최소탐지고도: 5000m (대기권 밖 탄도탄 추적용)
 - **탐지→추적 전이 시간**: 10s
+- **추적→교전급 전이 시간**: 12s (추정 — Arrow 시스템 fire control 시간 기준)
 - 큐잉 대상: L-SAM MFR, PATRIOT_RADAR
 - 안테나: 9m×3m (~27㎡), AESA, T/R 모듈 2000~2300개
 - 배치: **충남·충북 2기** (2012년 운용 개시)
@@ -160,7 +170,9 @@
 - **동시교전: 항공기 20개 / 탄도탄 10개** (MFR 제한)
 
 **ABM탄 (대탄도탄 요격)**:
-- 교전 봉투: 사거리 20~150km, 고도 50~60km (Block 1)
+- 교전 봉투: 사거리 20~150km, **고도 40~60km** (Block 1, Phase 2.0 자료 조사로 갱신)
+  - 출처: "intercept ballistic missiles ... at altitudes between 40 and 60 kilometers"
+  - 이전 가정 50~60km는 보수적 추정. 공개 자료 기반 40~60km로 확장
 - **미사일 속도: Mach 9** (~3100 m/s)
 - 유도방식: 중간유도 + **종말 IIR(적외선영상) 탐색기**, DACS 자세제어
 - 발사방식: 수직 핫런치, 이중펄스 추진
@@ -738,3 +750,172 @@ ecm_factor: 채프 0.15, 채프+플레어 0.20, 없음 0
 | 8 | 고가자산 낭비 | MOP | 저가 위협에 고가 탄 비율 |
 | 9 | TLS | MOP | 최종 격추 잔여 거리 |
 | 10 | BDA 대기 | MOP | S-L-S 추가 소요 |
+
+---
+
+## 14. Phase 2.0 자료 조사 보강 (2026.04)
+
+> Phase 2 진입 전 공개 자료 재조사를 통해 식별된 보강 사항.
+> 사용자 검토 + EADSIM 철학(특정 시나리오가 아닌 시뮬레이션 프레임워크)에 따른 모델링 결정 포함.
+
+### 14.1 Linear vs Kill-web 본질적 차이 (재정의)
+
+**잘못된 이전 가정**: "Linear는 Greedy, Kill-web은 Portfolio 최적화"
+
+**정확한 차이**: 알고리즘이 아닌 **의사결정자가 접근 가능한 정보의 범위와 신선도**
+
+| 층위 | Linear | Kill-web | 차이 원인 |
+|---|---|---|---|
+| 링크 지연 | longRange 16s, shortRange 1s, internal 0.5s | 모든 링크 < 1s | 데이터링크 종류 (기존 회선 vs Link-16급, 3ms 실측) |
+| 사람 판단 단계 | KAMD(20~60s) + ICC(5~15s) + ECS(2~5s) = **27~80s** (3단계) | IAOC(1~3s) + EOC(1~3s) = **2~6s** (2단계, 자동화 + 판단 범위 축소) | 자동화 수준 + 의사결정 depth |
+| 정보 신선도 | 누적 지연으로 KAMD가 보는 위협은 수십 초 전 위치 | 1~2초 전 | 링크 지연의 2차 효과 |
+| **센서-사수 결합** | 사수는 자기 포대 전용 MFR만 사용. MFR 파괴 시 무력화 | 사수가 임의 센서 데이터로 교전 가능 (IBCS "any sensor any shooter") | 데이터 공유 원칙 |
+
+**핵심 원칙**:
+- **사람의 단위 판단 속도**: 양쪽 동일 (같은 인간)
+- **사람이 판단해야 할 것의 양**: Linear >> Kill-web (Kill-web은 자동화로 축소)
+- **사람이 개입하는 노드 수**: Linear 3개 > Kill-web 2개
+
+출처: IBCS Wikipedia, Northrop Grumman, Link-16 Wikipedia, Patriot 운용 문헌
+
+### 14.2 GREEN_PINE의 fire control 능력 (자료 기반 갱신)
+
+- **하드웨어**: EL/M-2080은 원래 Arrow 시리즈 연계용 fire control radar로 설계됨
+- **능력**: search/detection/tracking/missile guidance를 동시 운용 가능
+- **한국 운용 현실**: Arrow 미도입 → 능력은 있으나 C2 토폴로지가 활용하지 못함
+- **모델링 결정**:
+  - `weapon-data.js`: `fireControl: 500km` 능력 필드 부여
+  - Linear 토폴로지(`kamd_ballistic`)의 GREEN_PINE→KAMD 엣지는 탐지/추적 정보만 전달, fire control 트랙은 사수의 visibleTracks에 미포함
+  - Kill-web 토폴로지에서 IAOC가 모든 센서 fire control 트랙 통합 → 활용
+- **시뮬레이션 의미**: Linear의 구조적 한계 — 하드웨어는 fire control 가능한데 C2 구조가 그것을 막음. Kill-web 도입 시 잠재 능력 활성화. 이 차이가 시뮬레이션이 측정할 핵심 지표 중 하나
+
+출처: Wikipedia EL/M-2080, IAI, Missile Defense Advocacy
+
+### 14.3 AESA 모드 전환 — "물리적 전환은 없다"
+
+- **자료 발견**: AESA 빔 조향은 microsecond 단위. 50ms 검색 + 10ms 추적 + 5ms 유도를 한 cycle에 인터리브 가능 (Lockheed Martin AN/SPY-1 사례)
+- **잘못된 이전 가정**: "탄도탄 모드 ↔ 항공기 모드 전환에 10초 소요"
+- **정확한 모델**: 물리적 모드 전환 비용 = 0. 진짜 비용은 **운용원 의사결정 시간** + **자원 배분 정책 변경**
+- **모델링 결정**: `modeTransitionTime` 별도 필드 제거. 대신 **Operating Mode + 자원 배분(trackCapacityAllocation)** 개념 도입
+
+출처: Wikipedia Phased array, Lockheed Martin AN/SPY-1, Northrop Grumman AESA 문서
+
+### 14.4 Operating Mode (운용 모드) 모델
+
+```
+Mode = {
+  name: 'ballistic_focus' | 'abt_focus' | 'hybrid',
+  trackCapacityAllocation: { ballistic: N, aircraft: M },
+  sectorPolicy: {
+    type: 'staring' | 'rotating',
+    stareAzimuth: deg,    // staring 시 방위 중심
+    stareWidth: deg,      // 유효 폭
+    rotationRate: rpm,    // rotating 시 회전 속도
+  }
+}
+
+LSAM.operatingModes = {
+  ballistic_focus: {
+    sectorPolicy: { type: 'staring', stareWidth: 60 },
+    trackCapacity: { ballistic: 10, aircraft: 0 },
+  },
+  abt_focus: {
+    sectorPolicy: { type: 'rotating', rotationRate: 60 },
+    trackCapacity: { ballistic: 0, aircraft: 20 },
+  },
+  hybrid: {
+    sectorPolicy: { type: 'rotating', rotationRate: 30 },
+    trackCapacity: { ballistic: 5, aircraft: 10 },
+  },
+}
+```
+
+**모드 전환 비용 모델**:
+- 물리적 (AESA 빔): 0 (microsecond)
+- 의사결정 (운용원 판단): operatorSkill 기반 (high 5s / mid 10s / low 20s)
+- Linear: KAMD/MCRC 운용원 판단 + 명령 하달 (C2 큐 + 링크 지연 누적)
+- Kill-web: IAOC 자동 결정 (1~3초)
+
+### 14.5 Sector Policy (섹터 정책) — 측면 우회 재현 핵심
+
+기존 weapon-data의 `azimuthHalf`는 정적 파라미터. 측면 우회 재현을 위해 동적 sector policy 도입:
+
+```
+SensorEntity.runtimeState.sectorPolicy = {
+  type: 'rotating' | 'staring',
+  stareAzimuth: number,
+  stareWidth: number,
+  rotationRate: number,
+}
+```
+
+**Linear (방공포벨트 지정 시)**: 정면 위협 방향으로 staring → 측면 미탐지
+**Kill-web (IAOC 자원 분배)**: 정면 포대만 staring, 측면 포대는 rotating → 측면 우회 탐지 후 인접 포대 교전
+
+### 14.6 측면 우회 시나리오 (Phase 2 필수 데모)
+
+**물리적 근거** (CSIS/CBO 분석):
+> "Establishing an unbroken radar perimeter against a 300ft cruise missile would require: 23 HALE-UAV orbits, 31 AEW&C orbits, 50 aerostat sites, 78 radar satellites, **OR 150 ground-based radar sites**."
+
+→ 단일 지상 레이더로 광역 저고도 CM 커버 불가. 측면 레이더 360° 모드가 우회 탐지의 유일한 지상 해법.
+
+**시나리오 사양**:
+```
+설정:
+  L-SAM 포대 P1 (정면): MFR_P1
+  L-SAM 포대 P2 (측면 30km 동쪽): MFR_P2
+  
+  t=0    CRUISE_MISSILE × 4발 발사
+         · 2발 정면 접근 (북쪽 85km, 고도 100m)
+         · 2발 측면 우회 (북동쪽 90km → 동쪽 산악 회피 → 서진)
+
+Linear 동작:
+  P1.MFR가 정면 위협 staring 모드 진입 (방공포벨트)
+  → 정면 2발 교전 진행
+  → 측면 2발: P1 staring으로 미탐지, P2도 자기 정면(북쪽) staring으로 미탐지
+  → 측면 2발 누출
+
+Kill-web 동작:
+  IAOC가 P1을 정면 staring, P2를 rotating 모드로 동적 배정
+  → 정면 2발: P1 교전
+  → 측면 2발: P2 rotating 모드로 우회 탐지
+              → IAOC 통해 P1 또는 P2 사수에게 교전 명령
+              → 격추
+```
+
+출처: CSIS "Extending the Horizon", CBO "National Cruise Missile Defense"
+
+### 14.7 데이터링크 latency 표 (자료 기반)
+
+| 링크 종류 | 측정 latency | 사용 위치 | 출처 |
+|---|---|---|---|
+| Link-16 | **3 ms** (실측) | Kill-web 모든 노드 | Wikipedia Link-16 |
+| Link-K (KVMF) | 미공개 | 한국 지상군 통합 | Hanwha Systems |
+| PADIL (Patriot UHF) | 미공개 | Patriot ICC↔포대 | GlobalSecurity Patriot |
+| 기존 회선 (Linear longRange) | **16s** (가정) | GP↔KAMD, KAMD↔ICC | KAMD 운용 보고 |
+
+**모델링 결정**: Kill-web 모든 노드 < 1초 (Link-16급, 1초는 Link-16 3ms 대비 대단히 보수적 안전치). Linear는 기존 16s/1s/0.5s 유지.
+
+### 14.8 무기체계 사양 갱신 요약
+
+| 항목 | 이전 | 갱신 후 | 근거 |
+|---|---|---|---|
+| L-SAM ABM Hmin | 50km | **40km** | "intercept ... at 40-60 km altitudes" |
+| GREEN_PINE fireControl | null | **500km** (Linear 미활용) | Arrow 연계용 hardware capability |
+| GREEN_PINE trackToFC 전이 | 미정 | **12s** (추정) | Arrow fire control 시간 추정 |
+| 천궁-II UAE 실전 | 미기록 | **2026.3 30발 중 29발 격추 (96.7%)** | Defence Security Asia 등 |
+
+### 14.9 보수 vs 일반 가정 채택 결정
+
+EADSIM 철학에 따른 판단 원칙: **공개 자료 부재 시 → 시나리오 생성자가 옵션으로 설정 가능하도록**, 코드에 보수/일반 어느 한쪽도 박지 않음.
+
+| 항목 | 채택 | 사유 |
+|---|---|---|
+| L-SAM MFR detect range | **310km 유지 (Phase 2)**, 600km 보고치는 Phase 5 정밀화 시 재검토 | 회귀 리스크 회피 |
+| 천궁-II Block2 동시교전 | **10** | 60% 향상 보고 + UAE 96.7% 결과 |
+| 모드 전환 물리 비용 | **0** | AESA microsecond 자료 |
+| 모드 전환 의사결정 비용 | **operatorSkill 기반** | 기존 모델 재사용 |
+| ADABELT 트리거 조건 | **시나리오 옵션 (수동 플래그)** | 공개 자료 없음, EADSIM 철학 |
+| KAMD-MCRC 협조 추가 시간 | **0 (링크 지연만)** | 공개 자료 없음 |
+| Link-K latency | **Link-16급 가정 (1초 보수)** | Link-K 미공개, Link-16 3ms 실측 보수 적용 |
+
