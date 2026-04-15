@@ -382,6 +382,24 @@
 - [ ] 7개 시나리오 전체 구현 (포화, 복합, EW, 순차, 노드파괴, TOT, MLRS포화)
 - [ ] 시나리오 선택 UI + 결과 비교 대시보드
 
+### 4.4 노드 파괴 시나리오 (Tree Parent 무력화 → sibling 중복교전)
+> Phase 2에서 예약된 HIGH 3/4 재정의 항목. Tree C2 구조의 구조적 취약성 재현.
+> (참조: `docs/tasks/phase2-multi-threat.md` §0.11 engagementPlan "독점 배정 규칙 재정의")
+
+- [ ] **KAMDOC 파괴 시나리오** — 탄도탄 축 Parent 무력화
+  - 시나리오: 적 SEAD(Suppression of Enemy Air Defenses) 선제 공격으로 KAMDOC 파괴
+  - 하위 ICC들은 sibling이지만 서로 데이터 공유 없음
+  - 각 ICC는 자기 관할 교전구역에 탄도탄이 들어오면 독립 판단 → 교전구역 겹침 영역에서 중복교전
+  - 측정: `중복교전율 = (다중 engagementPlan 위협 수) / (총 위협 수)`
+  - 기대: Linear+KAMDOC파괴 중복교전율 ≥ 10%, Kill-web 중복교전율 ≤ 2%
+- [ ] **MCRC 파괴 시나리오** — 비탄도탄 축 Parent 무력화
+  - 시나리오: 동일 구조, MCRC 대상
+  - 각 ICC가 자기 관할 구역 내 항공/순항 위협 독립 판단 → 겹침 영역 중복교전
+- [ ] **Tree Parent 회복탄력성 비교**
+  - Linear: Parent 파괴 → sibling 데이터 단절 → 중복교전 + 탄약 낭비
+  - Kill-web: IAOC 메시 네트워크 → 단일 노드 손실 시 우회 경로 유지 → 중복 없음
+  - 비교 지표: `탄약 효율 (격추 / 발사)`, `누출률`, `S2S 분포`
+
 ---
 
 ## Phase 5: 고급 기능

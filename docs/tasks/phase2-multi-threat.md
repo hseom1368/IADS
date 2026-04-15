@@ -231,7 +231,7 @@ Phase 2.5 구현 시 이 스키마를 단일 신뢰 출처로 사용할 것.
 
 ```js
 Track = {
-  threatId: string,               // 위협 식별자
+  threatId: string,               // 위협 식별자 (실제 위협 id 또는 오상관 가짜 id)
   position: {lon, lat, alt},      // 마지막 알려진 위치 (지연된 값)
   velocity: {dLon, dLat, dAlt},   // 마지막 알려진 속도
   lastUpdate: number,             // 마지막 업데이트 시각 (simTime, s)
@@ -239,16 +239,37 @@ Track = {
   staleness: number,              // simTime - lastUpdate (신선도, s)
   state: 'DETECTED' | 'TRACKED' | 'FIRE_CONTROL',
   confidence: number,             // 0~1, staleness × sensor 재밍 감쇠 반영
+
+  // 상관 모델 (E-06 반영, weapon-specs.md §8.1~§8.2 근거)
+  correlationType: 'correct' | 'mis' | 'failed',  // 올바른 상관 / 오상관 / 미상관
+  // Linear: 오상관 5%, 미상관 10%
+  // Kill-web: 오상관 1%, 미상관 2%
 }
 ```
+
+**Track 생성 관계** (F-01 해결):
+- `SensorEntity.trackStates: Map<threatId, {state, transitionTimer, consecutiveMisses}>` 는 **센서 내부 3단계 상태머신**
+- `Track` 객체는 **`trackStates`에서 파생된 뷰 객체**. `buildVisibleTracks(shooter, simTime, architecture)` 가 매 시점 센서 trackStates를 순회하며 Track 객체 생성
+- 즉, Track은 "사수 입장에서 보이는 가공된 정보", trackStates는 "센서가 내부적으로 관리하는 원천 상태"
+- 파생 시 `lastUpdate`/`staleness` 계산, 상관 확률 적용, 센서→사수 링크 지연 반영
+
+**상관/미상관 확률 적용 시점** (E-06):
+- **탐지 시점 (DETECTED → TRACKED 전이 시)**: 센서가 탐지한 신호를 어느 위협으로 상관 결정
+- 매 탐지 이벤트마다 랜덤 판정 (rng 기반, ADR-007 시드 재현성):
+  - `Linear`: 10% 확률로 `correlationType = 'failed'` (위협 놓침, Track 미생성)
+  - `Linear`: 5% 확률로 `correlationType = 'mis'` (엉뚱한 위협 id로 Track 생성, 과잉교전 유도)
+  - `Kill-web`: 각각 2%, 1%
+- 의미: Kill-web이 다중 센서 융합으로 상관 품질을 5배 향상시킨다는 구조적 이점을 정량 재현
 
 **정보 신선도 → PIP 보정**: `staleness`가 크면 PIP 예측 시점의 위협 위치 오차가 커짐. Linear는 축간 16s + 처리 시간 누적으로 staleness 30~80s 수준, Kill-web은 1~3s 수준.
 
 #### engagementPlan (한 위협에 대한 교전 계획)
 
 ```js
-threat.engagementPlan = {
+// engagementPlan은 threat당 여러 개 존재할 수 있다 (Linear C2 구조적 특성)
+threat.engagementPlans = [{
   shooterId: string,              // 배정된 포대 id
+  decidedBy: string,              // 이 계획을 생성한 C2 노드 id (KAMDOC / ICC_1 / IAOC 등)
   doctrine: 'SLS' | 'SS' | 'TS',  // 교리
   totalShots: number,             // 계획된 총 발사 수 (SLS=1, SS=2, TS=3)
   firedShots: number,             // 이미 발사한 수
@@ -257,10 +278,45 @@ threat.engagementPlan = {
   bdaStrategy: 'after_each' | 'after_last',  // BDA 시점
   firstMissReplan: boolean,       // 첫 발 MISS 시 재계획 허용 여부
   createdAt: number,              // 계획 생성 시각
-}
+}]
 ```
 
-**핵심 불변**: `firedShots > 0` 이면 재배정 금지 (lock). `firedShots === 0` 이면 매 프레임 재배정 허용 (Portfolio 전략 지원).
+**핵심 불변**:
+- `firedShots > 0` 이면 해당 plan 재배정 금지 (lock).
+- `firedShots === 0` 이면 매 프레임 재배정 허용.
+
+**독점 배정 규칙 재정의** (HIGH 3/4 교정, 사용자 교리 설명 반영):
+
+한국 방공망은 **축별 전담 원칙**이 기본:
+- **KAMD축**: 탄도탄(SRBM/MLRS_GUIDED)만 담당
+- **MCRC축**: 비탄도탄(AIRCRAFT/CRUISE_MISSILE/UAS)만 담당
+- 두 축이 **서로 다른 위협 유형**을 보므로 **축 간 중복교전은 원래 없음** (이전 오해 정정)
+
+**진짜 문제는 "축 내부에서 Parent 노드가 무력화될 때"**:
+
+```
+[정상 상태 — KAMDOC 생존]
+  KAMDOC ──(longRange 16s)──▶ ICC_1 ──▶ ECS_1 ──▶ 포대 A (강원)
+         └─(longRange 16s)──▶ ICC_2 ──▶ ECS_2 ──▶ 포대 B (경기)
+  KAMDOC이 전역 통제 → threat.engagementPlans.length === 1 보장
+  → 한 탄도탄에 한 포대만 배정 (독점)
+
+[KAMDOC 파괴 상태 — Tree Parent 무력화]
+  KAMDOC ✗ (데이터 공유 노드 단절)
+  ICC_1, ICC_2는 sibling이지만 서로 데이터 공유 없음
+  각 ICC는 자기 관할 교전구역에 탄도탄이 들어오면 독립적으로 교전 판단
+  → 교전구역 겹침 영역에서 threat.engagementPlans.length >= 2 발생
+  → 한 탄도탄에 포대 A와 포대 B가 독립 발사 → 탄약 낭비
+```
+
+**규칙**:
+- **Kill-web**: IAOC가 전역 통합 통제 → `engagementPlans.length === 1` 항상 보장 (Parent 파괴 무관, 메시 네트워크 회복탄력성)
+- **Linear (정상)**: 축 Parent(KAMDOC 또는 MCRC) 생존 시 → `engagementPlans.length === 1` 보장
+- **Linear (Parent 파괴)**: 축 Parent 파괴 시 → 각 ICC가 독립 판단 → `engagementPlans.length >= 1` (겹침 영역에서 중복)
+
+**Phase 2 범위 (정상 상태)**: 모든 시나리오에서 `engagementPlans.length === 1` 보장 (축 내 Parent 생존 가정). 독점 검증 테스트 작성.
+
+**Phase 4 범위 (노드 파괴 시나리오)**: KAMDOC/MCRC 파괴 시 sibling ICC 중복교전 재현 + 중복교전율 측정 (ROADMAP Phase 4.3 "노드파괴" 시나리오에 연결).
 
 #### dryRunEvaluate 시그니처
 
@@ -268,6 +324,15 @@ threat.engagementPlan = {
 /**
  * 원자 평가 함수 — side-effect free.
  * 배정 전략(GreedyLocal, PortfolioGlobal 미래)에 독립.
+ *
+ * ROE 체크 (ADR-009): PIP 기반 교전 봉투 판정.
+ *   - STEP 1에서 미래 300초 범위의 PIP 후보를 탐색하며 봉투 내 체크
+ *   - 최종 PIP 좌표로 isInEnvelope() 재확인
+ *   - 위협 현재 위치가 아닌 PIP(예상 교전점) 기준 — CLAUDE.md 원칙 #9
+ *
+ * 확장 훅 (Phase 5 정밀화 범위):
+ *   options.roeCheck?.(threat, battery) → 추가 ROE 규칙
+ *   (아군 오사 방지, 민간 보호 구역, 식별 불확실성 등 — Phase 2에는 미구현)
  */
 function dryRunEvaluate(threat, battery, mfrSensor, registry, simTime, options) {
   return {
@@ -283,10 +348,16 @@ function dryRunEvaluate(threat, battery, mfrSensor, registry, simTime, options) 
       ammo: { [missileType]: number },
     },
     skipReason: string | null,       // feasible=false인 사유
-    // 예: 'envelope_miss', 'no_fire_control', 'ammo_depleted', 'horizon_out'
+    // 예: 'pip_outside_envelope', 'no_fire_control', 'ammo_depleted',
+    //     'horizon_out', 'launch_time_passed', 'roe_denied' (Phase 5)
   };
 }
 ```
+
+**F-03: slotOccupancy ↔ BatteryEntity.slots 필드명 일치 의무**:
+- 위 `slotOccupancy`의 키(`mfrTrack`, `simultaneousEngagement`)는 아래 `BatteryEntity.slots`의 키와 **반드시 동일**
+- 연산: `battery.slots[key].used += dryRun.slotOccupancy[key]` 가 직접 가능해야 함
+- 한쪽을 확장하면 다른 쪽도 동시 확장 (예: Phase 5에서 `dataLinkBandwidth` 추가 시 양쪽 동시)
 
 #### BatteryEntity.slots (자원 분리 모델)
 
@@ -393,7 +464,64 @@ function validateWave(wave, engine) {
 - **근거**: 우리 무기체계 대응 범위에 적합 + 수평선 물리 정확 (188m 안테나 vs 100m 표적 = 84.6km)
 - **결과**: §0.6 측면 우회 시나리오, weapon-specs.md §14.6 좌표 반영
 
----
+#### ADR-007: 시드 기반 재현성 — Phase 2.5에 rng.js 도입 (E-01 CRITICAL)
 
-> **§1 이하의 이전 작업 명세서는 `phase2-history.md`로 이동되었습니다.**
-> 다음 응답에서 §0 확장 (스키마 정의, ADR 형식, 회귀 게이트, 테스트 파일 명명 등)이 추가됩니다.
+- **배경**: 현재 `Math.random()`을 `sensor-model.js`, `engagement-model.js`, `sim-engine.js` 전역에서 직접 사용 → 같은 시나리오 두 번 돌리면 결과가 다름. EADSIM 몬테카를로의 기본 전제(같은 시드 → 같은 결과) 불가능
+- **대안 A**: Phase 3로 미룸 → Phase 3 시작 시 엔진 전체를 다시 뜯어고쳐야 함 (리팩토링 부담)
+- **대안 B**: Phase 2.5에 신규 모듈 `rng.js` 도입
+- **결정**: 옵션 B (Phase 2.5 포함)
+- **근거**:
+  - EADSIM 원칙 중 가장 중요한 것: 같은 조건 → 동일 결과 (재현성)
+  - Phase 3 MOE/MOP 메트릭(PRA, 누출률, S2S 등)은 몬테카를로 30회 평균이 필수 — 시드 제어 없이는 불가능
+  - Phase 2.5에 도입하면 리팩토링 범위 최소 (track-pool과 동시 구현)
+  - 알고리즘: Mulberry32 또는 xorshift (32-bit seed, 균등 분포, 의존성 0)
+- **결과 (Phase 2.5 구현 범위)**:
+  - `src/core/rng.js` 신규 — `createRng(seed)` 팩토리 함수
+  - `sim-engine.js` 옵션 `rngSeed` 추가 (기본값: 현재 timestamp)
+  - `updateSensorState`, `evaluateEngagement`, `_stepEngagement`, `_stepBDA` 등에서 `Math.random` → `engine.rng()` 로 교체
+  - 테스트: `tests/rng.test.js` (같은 시드 → 같은 시퀀스, 분포 균등성)
+  - 회귀: 기존 Phase 1 스모크 테스트는 Math.random에 의존 — `rngSeed` 없으면 기존 동작 유지 (하위 호환)
+
+#### ADR-008: EADSIM 대비 의도된 단순화 목록 (신뢰도 논의용)
+
+- **배경**: EADSIM은 full-fidelity 시뮬레이션. 우리는 EADSIM-Lite로 의도적으로 일부 기능을 단순화 또는 제외. 향후 "왜 여긴 이렇게만 했지?"라는 신뢰도 논의가 발생할 때 명시적 근거가 필요
+- **결정**: Phase 2 범위에서 다음 항목들을 **의도적으로 단순화**하고, Phase 5 또는 향후 정밀화로 미룸
+- **단순화 목록**:
+
+| # | 항목 | EADSIM | 우리 모델 (Phase 2) | 이유 | 향후 처리 |
+|---|---|---|---|---|---|
+| S-1 | 명중 판정 | 미사일 근접도 + 신관 작동 확률 실시간 계산 | 발사 시점 PSSEK로 결정 (CLAUDE.md 원칙 #10) | 시각화/엔진 분리, 통계적 동일 | 유지 (정밀화 불필요) |
+| S-2 | 시간 진행 | Discrete Event Simulation | requestAnimationFrame + 0.02s 서브스텝 | Cesium 3D 시각화 결합 | Phase 5 headless 모드 검토 |
+| S-3 | 적응형 교전 정책 | 탄약 30%/10% 기준 정책 전환 | **Phase 2는 표준 교전만** (사용자 결정) | Kill-web 구현 복잡도 제어 | Phase 3 메트릭 검토 후 재결정 |
+| S-4 | ROE 상세 | 아군 오사 방지, 민간 보호, 식별 불확실성, 교전 금지구역 등 | **PIP 기반 교전 봉투 판정만** (ADR-009) | Phase 2 핵심은 Linear/Kill-web 비교 | Phase 5 정밀화 |
+| S-5 | 통신 메시지 손실 | 확률적 패킷 드롭 + 재전송 | 재밍 열화만 (> 0.8 시 두절) | 단순 이진 모델 | Phase 5 정밀화 |
+| S-6 | False Alarm Rate | 레이더 오경보 (없는 표적 잡기) | 없음 | Phase 2 범위 밖 | Phase 5 정밀화 |
+| S-7 | 센서 측정 오차 | range/azimuth/elevation Gaussian noise | 탐지 시 정확한 위치 반환 | Phase 2 범위 밖 | Phase 5 정밀화 |
+| S-8 | Environment | 기상, 낮/밤, 지형 IR 반사 | 수평선 + sector 제약만 | Phase 2 범위 밖 | Phase 5 정밀화 |
+| S-9 | 궤적 함수 일반화 | phases[].range 데이터 기반 | 함수 내부 하드코딩 (0.25/0.70, 0.85/0.92) | 현재 경계값 일치로 우회 | Phase 5 리팩토링 |
+
+- **근거**:
+  - 우리 시뮬레이션 핵심 목적: **Linear vs Kill-web C2 아키텍처 비교**
+  - 이 목적에 직접 영향 주지 않는 항목은 단순화 허용
+  - 단, 단순화한 항목은 모두 이 표에 기록하여 "빠진 것이 아니라 의도적"임을 명시
+  - Phase 5 정밀화 시 이 표를 기반으로 항목별 재검토
+- **결과**: 본 ADR이 단일 신뢰 출처. ROADMAP Phase 5.1에 관련 항목 존재 확인 필요 (S-5, S-6, S-7, S-8, S-9)
+
+#### ADR-009: ROE = PIP 기반 교전 봉투 판정 (원칙 #9 재확인)
+
+- **배경**: "교전 규칙(Rules of Engagement)" 개념이 문서에 명시적으로 정리되지 않아 혼동 여지. 사용자 확인: "위협이 교전구역 내에 있을 때만 발사"라는 보수적 규칙은 잘못되었고, PIP(예상 교전점) 기반 판정이 올바른 모델
+- **현재 코드 확인 결과 (`src/core/engagement-model.js:100~143`)**:
+  - `evaluateEngagement` STEP 1이 이미 PIP 기반으로 구현됨
+  - 미래 300초 범위에서 위협 궤적 예측 (`ballisticTrajectory`/`cruiseTrajectory`/`aircraftTrajectory`)
+  - 예측된 미래 위치들 중 교전 봉투(`Rmin/Rmax/Hmin/Hmax`) 내에 있는 시점을 PIP로 선정
+  - 최종 PIP 좌표로 `isInEnvelope()` 재확인
+  - 봉투 밖이면 `SKIP ('pip_outside_envelope')`
+- **결정**: 코드 변경 없음. **문서에만 ROE 개념 명시**
+- **근거**:
+  - 원칙 #9 "PIP 유효성"이 이미 CLAUDE.md에 명시되어 있음
+  - 사용자가 우려한 "위협이 봉투 밖인데 PIP는 봉투 내" / "위협이 봉투 내인데 PIP는 봉투 밖" 두 경우 모두 코드가 올바르게 처리 중
+  - 위협 현재 위치가 아닌 미래 예상 교전점이 판단 기준 — 실제 방공 교리와 일치
+- **결과**:
+  - `dryRunEvaluate` 주석에 "PIP 기반 ROE" 명시 (§0.11 완료)
+  - 향후 ROE 확장(아군 오사/민간 보호 등)은 `options.roeCheck` 훅으로 Phase 5 정밀화 시 추가
+  - 본 ADR을 통해 "교전구역 밖이면 절대 안 쏜다"가 아니라 **"PIP가 교전구역 내면 쏜다"** 원칙 박제
