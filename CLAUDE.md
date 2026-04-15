@@ -26,6 +26,9 @@ Cesium 기반 3D 시각화, 단일 HTML+JS 프론트엔드, 백엔드 없음.
 9. **PIP 유효성**: 모든 발사는 PIP가 해당 무기의 교전 봉투 내이고, 미사일 flyout 시간 내에 위협이 PIP에 도달 가능할 때만 승인. PIP 산출은 실제 궤적 함수(sin 포물선 등) 기반.
 10. **교전 결과 사전 결정**: 교전 결과(HIT/MISS)는 발사 시점에 PSSEK Pk로 즉시 결정. 이후 어떤 물리 계산(CCD, kill radius, PNG 유도 등)도 결과를 변경하지 않음.
 11. **시각화는 결과의 연출**: 시각화 모듈은 사전 결정된 교전 결과를 재현. 미사일은 PIP까지 비행 후 결과에 따라 위협과 함께 폭발(HIT) 또는 교차 후 자폭(MISS). 유도 방식별 시각화: hit-to-kill(PIP 직선) / PNG(근접신관) / CLOS(천마 시선 추적).
+12. **Linear vs Kill-web 본질 = 정보 풀의 범위와 신선도**: 알고리즘은 단일. 양쪽 모두 사람이 합리적으로 판단함. 차이는 (a) 데이터링크 지연(Linear 16s vs Kill-web <1s), (b) 사람 판단 단계 수(Linear 3개 vs Kill-web 2개), (c) 자동화로 인한 판단 depth, (d) 정보 신선도 — 4개 층위. 알고리즘을 두 가지로 분리하지 말 것. (상세: `phase2-multi-threat.md` §0.1, `weapon-specs.md` §14.1)
+13. **사수 선정은 단일 함수 + visibleTracks 분기**: `selectShooter()` 함수는 한 개. `buildVisibleTracks(architecture)`만 Linear/Kill-web별로 분기. Linear는 자기 포대 MFR + 자기 C2축 명령 트랙만, Kill-web은 모든 센서 fire control 트랙. (상세: `phase2-multi-threat.md` §0.2)
+14. **운용 모드는 자원 배분 정책**: AESA 빔 전환은 microsecond → 물리적 모드 전환 비용 0. 진짜 비용은 운용원 의사결정 시간(operatorSkill 기반) + trackCapacity 자원 배분. 별도 `modeTransitionTime` 필드 금지. (상세: `phase2-multi-threat.md` §0.4, `weapon-specs.md` §14.3)
 
 ## 소프트웨어 설계 원칙
 1. **SSOT**: 모든 무기체계 파라미터는 `src/config/weapon-data.js` 단일 소스
@@ -49,6 +52,24 @@ Cesium 기반 3D 시각화, 단일 HTML+JS 프론트엔드, 백엔드 없음.
 - JSDoc 필수: 모든 public 메서드
 - **교차 참조 검증**: 핵심 함수(physics, engagement-model) 시그니처/동작 변경 시 `grep -r "함수명" src/ tests/`로 모든 호출처를 동일 커밋에서 갱신
 - **최종 소비자 확인**: index.html은 core 모듈의 최종 소비자 — 엔티티 생성자 파라미터 변경 시 반드시 index.html 호출부 확인
+
+## 작업 패턴 (Stream/Context 효율)
+
+> 본 프로젝트의 작업 명세서는 큰 문서 변경을 자주 동반함. Stream idle timeout과
+> 컨텍스트 포화를 피하면서 효율적으로 작업하기 위한 패턴.
+
+- **Stream timeout 회피**: 큰 Edit 페이로드(수백 줄)는 같은 응답 내에서 여러 작은
+  Edit으로 분할해 호출하라. 단일 거대 Edit은 payload 생성 시간 동안 stream idle을
+  유발할 수 있다. 신규 대형 파일 생성은 Write를 사용하라.
+- **작업 단위 응답**: 한 응답 = 한 완결 작업 단위. 여러 독립 작업은 병렬 도구
+  호출로 같은 응답에 묶되, 논리적으로 다른 단계는 응답을 분리하라.
+- **짧은 메시지 반복 금지**: "X 진행합니다" → 도구 호출 → "Y 진행합니다" → 도구 호출
+  과 같은 짧은 메시지 반복은 토큰 낭비 + 컨텍스트 포화 가속을 유발한다. 대신 **한
+  응답에 한 완결 작업을 끝까지** 수행하고 자연스럽게 종료하라.
+- **Thinking 최소화**: 긴 thinking 블록은 stream idle 위험을 높인다. 분석은 text
+  출력으로 수행하고, thinking은 단순 판단에만 사용하라.
+- **작업 계획 우선**: 대규모 변경 전에는 응답별 작업 단위를 사용자에게 먼저
+  명시하라. 사용자가 진행 상황을 추적할 수 있고, 중단 시 재개점이 명확해진다.
 
 ## 파일 수정 시 금지사항
 - `docs/` 참조 문서 직접 수정 금지

@@ -859,29 +859,50 @@ SensorEntity.runtimeState.sectorPolicy = {
 
 → 단일 지상 레이더로 광역 저고도 CM 커버 불가. 측면 레이더 360° 모드가 우회 탐지의 유일한 지상 해법.
 
-**시나리오 사양**:
+**시나리오 사양** (구체 좌표):
+
 ```
-설정:
-  L-SAM 포대 P1 (정면): MFR_P1
-  L-SAM 포대 P2 (측면 30km 동쪽): MFR_P2
-  
-  t=0    CRUISE_MISSILE × 4발 발사
-         · 2발 정면 접근 (북쪽 85km, 고도 100m)
-         · 2발 측면 우회 (북동쪽 90km → 동쪽 산악 회피 → 서진)
+■ 방어 자산 좌표 (수도권 중부 기준)
+  L-SAM 포대 P1 (정면)  : { lon: 127.00, lat: 37.10, alt: 150 }  ← 정면 staring
+  L-SAM MFR_P1          : { lon: 127.00, lat: 37.12, alt: 180 }
+  L-SAM 포대 P2 (측면)  : { lon: 127.30, lat: 37.10, alt: 150 }  ← P1 동쪽 약 27km
+  L-SAM MFR_P2          : { lon: 127.30, lat: 37.12, alt: 180 }
+  보호 표적              : { lon: 127.15, lat: 37.00, alt: 0 }   ← 수도권 중심 가정
+
+■ 위협 발사 (t=0)
+  CM-1 (정면)   start: { lon: 127.00, lat: 37.87, alt: 100 }  → 표적 (P1 북쪽 ~85km)
+  CM-2 (정면)   start: { lon: 127.05, lat: 37.87, alt: 100 }  → 표적 (P1 북쪽 ~85km)
+  CM-3 (측면우회) start: { lon: 127.55, lat: 37.85, alt: 100 } → 중간 waypoint
+                  waypoint: { lon: 127.50, lat: 37.30, alt: 100 } → 표적 (동→남→서진)
+  CM-4 (측면우회) start: { lon: 127.60, lat: 37.85, alt: 100 } → 중간 waypoint
+                  waypoint: { lon: 127.55, lat: 37.30, alt: 100 } → 표적
+
+■ 검증 항목
+  - 수평선 계산: MFR (188m) vs CM (100m) → 약 84.6km
+    → CM-1, CM-2 발사 직후 P1 수평선 안쪽
+    → CM-3, CM-4는 출발 시점에 P1 수평선 밖, P2 수평선 안쪽 (측면)
+  - 비행 시간: 85km / 272 m/s ≈ 312초 (충분한 대응 시간)
 
 Linear 동작:
-  P1.MFR가 정면 위협 staring 모드 진입 (방공포벨트)
-  → 정면 2발 교전 진행
-  → 측면 2발: P1 staring으로 미탐지, P2도 자기 정면(북쪽) staring으로 미탐지
-  → 측면 2발 누출
+  P1.MFR가 정면 위협 staring 모드 진입 (방공포벨트, 방위각 0° ± 60°)
+  P2.MFR도 자기 정면(북쪽) staring 모드 (관할 구역 정면)
+  → 정면 2발: P1 교전 (Pk 80~85% × 2발 = 격추)
+  → 측면 2발: 양쪽 MFR 모두 동쪽 미감시 → CM-3/CM-4 누출 → 표적 피해
 
 Kill-web 동작:
-  IAOC가 P1을 정면 staring, P2를 rotating 모드로 동적 배정
-  → 정면 2발: P1 교전
-  → 측면 2발: P2 rotating 모드로 우회 탐지
-              → IAOC 통해 P1 또는 P2 사수에게 교전 명령
-              → 격추
+  IAOC가 전체 위협 식별 후 자원 배분:
+    P1: 정면 staring (CM-1/CM-2 대응)
+    P2: rotating 모드 (40 rpm, 360° 감시)
+  → 정면 2발: P1 교전 → 격추
+  → 측면 2발: P2 rotating으로 우회 탐지 (탐지 시점 ~30~50km)
+              → IAOC가 P2 사수에게 교전 명령 (1초 내)
+              → P2 발사 → 격추
 ```
+
+**시나리오 검증 기대치**:
+- Linear: PRA ≈ 0.5 (4발 중 2발 격추), 누출률 0.5
+- Kill-web: PRA ≈ 0.85~0.95 (4발 중 3~4발 격추), 누출률 ≤ 0.25
+- S2S 차이: Linear는 측면 2발 미탐지로 S2S 무한대, Kill-web은 모든 위협 < 60s
 
 출처: CSIS "Extending the Horizon", CBO "National Cruise Missile Defense"
 
